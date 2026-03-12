@@ -282,10 +282,14 @@ jobs:
           append_runtime_env "JUDGE_PROBLEM_EVENTS_QUEUE_URL" "${JUDGE_PROBLEM_EVENTS_QUEUE_URL}"
 
           # Always use internal Docker DNS names for runtime dependencies.
-          # This prevents accidental localhost/external endpoint injection via APP_ENV_VARS.
-          append_runtime_env "MONGODB_URI" "mongodb://${MONGODB_USER}:${MONGODB_PASSWORD}@mongodb:27017/${MONGODB_DATABASE}?authSource=admin"
+          # Also override Spring direct keys to prevent APP_ENV_VARS from injecting localhost endpoints.
+          INTERNAL_MONGODB_URI="mongodb://${MONGODB_USER}:${MONGODB_PASSWORD}@mongodb:27017/${MONGODB_DATABASE}?authSource=admin"
+          append_runtime_env "MONGODB_URI" "${INTERNAL_MONGODB_URI}"
+          append_runtime_env "SPRING_DATA_MONGODB_URI" "${INTERNAL_MONGODB_URI}"
           append_runtime_env "REDIS_HOST" "redis"
           append_runtime_env "REDIS_PORT" "6379"
+          append_runtime_env "SPRING_DATA_REDIS_HOST" "redis"
+          append_runtime_env "SPRING_DATA_REDIS_PORT" "6379"
 
           APP_DOCKER_NETWORK="${AWS_APP_NETWORK:-online-judge-net}"
           export APP_DOCKER_NETWORK IMAGE_URI
