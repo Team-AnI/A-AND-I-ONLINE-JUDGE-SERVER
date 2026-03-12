@@ -28,13 +28,16 @@ jobs:
       AWS_GITHUB_ROLE_ARN: ${{ secrets.AWS_GITHUB_ROLE_ARN }}
       AWS_CONTAINER_NAME: ${{ secrets.AWS_CONTAINER_NAME }}
       AWS_APP_PORT: ${{ secrets.AWS_APP_PORT }}
-      AWS_DOCKER_RUN_EXTRA_ARGS: ${{ secrets.AWS_DOCKER_RUN_EXTRA_ARGS }}
+      AWS_APP_NETWORK: ${{ secrets.AWS_APP_NETWORK }}
       APP_ENV_VARS: ${{ secrets.APP_ENV_VARS }}
       JUDGE_JWT_AUTH_SIGNING_KEY: ${{ secrets.JUDGE_JWT_AUTH_SIGNING_KEY }}
       MONGODB_URI: ${{ secrets.MONGODB_URI }}
       MONGODB_USER: ${{ secrets.MONGODB_USER }}
       MONGODB_PASSWORD: ${{ secrets.MONGODB_PASSWORD }}
       MONGODB_DATABASE: ${{ secrets.MONGODB_DATABASE }}
+      MONGODB_PORT: ${{ secrets.MONGODB_PORT }}
+      MONGODB_IMAGE: ${{ secrets.MONGODB_IMAGE }}
+      MONGODB_CONTAINER_NAME: ${{ secrets.MONGODB_CONTAINER_NAME }}
       REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
       JUDGE_PROBLEM_EVENTS_QUEUE_URL: ${{ secrets.JUDGE_PROBLEM_EVENTS_QUEUE_URL }}
 
@@ -69,6 +72,9 @@ jobs:
             AWS_ECR_REPOSITORY
             AWS_GITHUB_ROLE_ARN
             JUDGE_JWT_AUTH_SIGNING_KEY
+            MONGODB_USER
+            MONGODB_PASSWORD
+            MONGODB_DATABASE
           )
           for name in "${required_vars[@]}"; do
             if [[ -z "${!name:-}" ]]; then
@@ -122,41 +128,28 @@ jobs:
             -t "${IMAGE_URI}" \
             .
 
-      - name: Prepare Runtime Env File
+      - name: Encode Runtime Values
         run: |
           set -euo pipefail
-          : > online-judge.env
-
-          if [[ -n "${APP_ENV_VARS:-}" ]]; then
-            {
-              echo "# app env vars (stored in GitHub Secrets)"
-              printf "%s\n" "${APP_ENV_VARS}"
-              echo
-            } >> online-judge.env
-          fi
-
-          append_env() {
+          encode_and_export() {
             local key="$1"
-            local value="${2:-}"
-            local required="${3:-false}"
-
-            if [[ "${required}" == "true" && -z "${value}" ]]; then
-              echo "Missing required secret: ${key}"
-              exit 1
-            fi
-            if [[ -n "${value}" ]]; then
-              printf "%s=%s\n" "${key}" "${value}" >> online-judge.env
-            fi
+            local value="${!key:-}"
+            local encoded
+            encoded="$(printf "%s" "${value}" | base64 | tr -d '\n')"
+            echo "${key}_B64=${encoded}" >> "${GITHUB_ENV}"
           }
 
-          echo "# app env secrets (individual GitHub Secrets)" >> online-judge.env
-          append_env "JUDGE_JWT_AUTH_SIGNING_KEY" "${JUDGE_JWT_AUTH_SIGNING_KEY}" "true"
-          append_env "MONGODB_URI" "${MONGODB_URI}"
-          append_env "MONGODB_USER" "${MONGODB_USER}"
-          append_env "MONGODB_PASSWORD" "${MONGODB_PASSWORD}"
-          append_env "MONGODB_DATABASE" "${MONGODB_DATABASE}"
-          append_env "REDIS_PASSWORD" "${REDIS_PASSWORD}"
-          append_env "JUDGE_PROBLEM_EVENTS_QUEUE_URL" "${JUDGE_PROBLEM_EVENTS_QUEUE_URL}"
+          encode_and_export APP_ENV_VARS
+          encode_and_export JUDGE_JWT_AUTH_SIGNING_KEY
+          encode_and_export MONGODB_URI
+          encode_and_export MONGODB_USER
+          encode_and_export MONGODB_PASSWORD
+          encode_and_export MONGODB_DATABASE
+          encode_and_export MONGODB_PORT
+          encode_and_export MONGODB_IMAGE
+          encode_and_export MONGODB_CONTAINER_NAME
+          encode_and_export REDIS_PASSWORD
+          encode_and_export JUDGE_PROBLEM_EVENTS_QUEUE_URL
 
       - name: Configure SSH
         run: |
@@ -174,26 +167,24 @@ jobs:
           fi
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Upload Artifacts
-        run: |
-          set -euo pipefail
-          PORT="${AWS_PORT:-22}"
-          scp -P "${PORT}" online-judge.env "${AWS_USER}@${AWS_HOST}:/tmp/online-judge.env"
-
       - name: Remote Deploy Container
         run: |
           set -euo pipefail
           PORT="${AWS_PORT:-22}"
-          APP_DIR="${AWS_APP_DIR:-/opt/online-judge}"
+          APP_DIR="${AWS_APP_DIR:-/home/${AWS_USER}/online-judge}"
           CONTAINER_NAME="${AWS_CONTAINER_NAME:-online-judge}"
           APP_PORT="${AWS_APP_PORT:-8080}"
+          APP_NETWORK="${AWS_APP_NETWORK:-online-judge-net}"
 
           ssh -p "${PORT}" "${AWS_USER}@${AWS_HOST}" \
-            "AWS_APP_DIR='${APP_DIR}' AWS_REGION='${AWS_REGION}' AWS_ACCOUNT_ID='${AWS_ACCOUNT_ID}' AWS_ECR_REPOSITORY='${AWS_ECR_REPOSITORY}' IMAGE_URI='${IMAGE_URI}' AWS_CONTAINER_NAME='${CONTAINER_NAME}' AWS_APP_PORT='${APP_PORT}' AWS_DOCKER_RUN_EXTRA_ARGS='${AWS_DOCKER_RUN_EXTRA_ARGS}' bash -s" <<'EOF'
+            "AWS_APP_DIR='${APP_DIR}' AWS_REGION='${AWS_REGION}' AWS_ACCOUNT_ID='${AWS_ACCOUNT_ID}' AWS_ECR_REPOSITORY='${AWS_ECR_REPOSITORY}' IMAGE_URI='${IMAGE_URI}' AWS_CONTAINER_NAME='${CONTAINER_NAME}' AWS_APP_PORT='${APP_PORT}' AWS_APP_NETWORK='${APP_NETWORK}' APP_ENV_VARS_B64='${APP_ENV_VARS_B64}' JUDGE_JWT_AUTH_SIGNING_KEY_B64='${JUDGE_JWT_AUTH_SIGNING_KEY_B64}' MONGODB_URI_B64='${MONGODB_URI_B64}' MONGODB_USER_B64='${MONGODB_USER_B64}' MONGODB_PASSWORD_B64='${MONGODB_PASSWORD_B64}' MONGODB_DATABASE_B64='${MONGODB_DATABASE_B64}' MONGODB_PORT_B64='${MONGODB_PORT_B64}' MONGODB_IMAGE_B64='${MONGODB_IMAGE_B64}' MONGODB_CONTAINER_NAME_B64='${MONGODB_CONTAINER_NAME_B64}' REDIS_PASSWORD_B64='${REDIS_PASSWORD_B64}' JUDGE_PROBLEM_EVENTS_QUEUE_URL_B64='${JUDGE_PROBLEM_EVENTS_QUEUE_URL_B64}' bash -s" <<'EOF'
           set -euo pipefail
           mkdir -p "${AWS_APP_DIR}"
-          install -m 600 /tmp/online-judge.env "${AWS_APP_DIR}/.env"
-          rm -f /tmp/online-judge.env
+          if [[ ! -w "${AWS_APP_DIR}" ]]; then
+            echo "AWS_APP_DIR is not writable: ${AWS_APP_DIR}"
+            echo "Set AWS_APP_DIR secret to a writable path (example: /home/<user>/online-judge)"
+            exit 1
+          fi
 
           if ! command -v aws >/dev/null 2>&1; then
             echo "aws CLI is required on EC2 host"
@@ -203,19 +194,154 @@ jobs:
             echo "docker is required on EC2 host"
             exit 1
           fi
+          if ! docker compose version >/dev/null 2>&1; then
+            echo "docker compose plugin is required on EC2 host"
+            exit 1
+          fi
+
+          decode_b64() {
+            local encoded="${1:-}"
+            if [[ -z "${encoded}" ]]; then
+              printf ""
+            else
+              printf "%s" "${encoded}" | base64 --decode
+            fi
+          }
+
+          APP_ENV_VARS="$(decode_b64 "${APP_ENV_VARS_B64:-}")"
+          JUDGE_JWT_AUTH_SIGNING_KEY="$(decode_b64 "${JUDGE_JWT_AUTH_SIGNING_KEY_B64:-}")"
+          MONGODB_URI="$(decode_b64 "${MONGODB_URI_B64:-}")"
+          MONGODB_USER="$(decode_b64 "${MONGODB_USER_B64:-}")"
+          MONGODB_PASSWORD="$(decode_b64 "${MONGODB_PASSWORD_B64:-}")"
+          MONGODB_DATABASE="$(decode_b64 "${MONGODB_DATABASE_B64:-}")"
+          MONGODB_PORT="$(decode_b64 "${MONGODB_PORT_B64:-}")"
+          MONGODB_IMAGE="$(decode_b64 "${MONGODB_IMAGE_B64:-}")"
+          MONGODB_CONTAINER_NAME="$(decode_b64 "${MONGODB_CONTAINER_NAME_B64:-}")"
+          REDIS_PASSWORD="$(decode_b64 "${REDIS_PASSWORD_B64:-}")"
+          JUDGE_PROBLEM_EVENTS_QUEUE_URL="$(decode_b64 "${JUDGE_PROBLEM_EVENTS_QUEUE_URL_B64:-}")"
+
+          app_env_keys=()
+
+          has_env_key() {
+            local target="$1"
+            local item
+            for item in "${app_env_keys[@]}"; do
+              if [[ "${item}" == "${target}" ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          register_env_key() {
+            local key="$1"
+            if ! has_env_key "${key}"; then
+              app_env_keys+=("${key}")
+            fi
+          }
+
+          append_runtime_env() {
+            local key="$1"
+            local value="${2:-}"
+            local required="${3:-false}"
+
+            if [[ "${required}" == "true" && -z "${value}" ]]; then
+              echo "Missing required runtime env: ${key}"
+              exit 1
+            fi
+            if [[ -n "${value}" ]]; then
+              export "${key}=${value}"
+              register_env_key "${key}"
+            fi
+          }
+
+          if [[ -n "${APP_ENV_VARS}" ]]; then
+            while IFS= read -r line; do
+              line="${line%$'\r'}"
+              if [[ -z "${line}" || "${line}" =~ ^[[:space:]]*# ]]; then
+                continue
+              fi
+              if [[ "${line}" != *=* ]]; then
+                continue
+              fi
+              key="${line%%=*}"
+              value="${line#*=}"
+              export "${key}=${value}"
+              register_env_key "${key}"
+            done <<< "${APP_ENV_VARS}"
+          fi
+
+          append_runtime_env "JUDGE_JWT_AUTH_SIGNING_KEY" "${JUDGE_JWT_AUTH_SIGNING_KEY}" "true"
+          append_runtime_env "MONGODB_USER" "${MONGODB_USER}" "true"
+          append_runtime_env "MONGODB_PASSWORD" "${MONGODB_PASSWORD}" "true"
+          append_runtime_env "MONGODB_DATABASE" "${MONGODB_DATABASE}" "true"
+          append_runtime_env "MONGODB_PORT" "${MONGODB_PORT}"
+          append_runtime_env "MONGODB_IMAGE" "${MONGODB_IMAGE}"
+          append_runtime_env "MONGODB_CONTAINER_NAME" "${MONGODB_CONTAINER_NAME}"
+          append_runtime_env "REDIS_PASSWORD" "${REDIS_PASSWORD}"
+          append_runtime_env "JUDGE_PROBLEM_EVENTS_QUEUE_URL" "${JUDGE_PROBLEM_EVENTS_QUEUE_URL}"
+
+          if [[ -n "${MONGODB_URI}" ]]; then
+            append_runtime_env "MONGODB_URI" "${MONGODB_URI}"
+          else
+            append_runtime_env "MONGODB_URI" "mongodb://${MONGODB_USER}:${MONGODB_PASSWORD}@mongodb:27017/${MONGODB_DATABASE}?authSource=admin"
+          fi
+
+          APP_DOCKER_NETWORK="${AWS_APP_NETWORK:-online-judge-net}"
+          export APP_DOCKER_NETWORK IMAGE_URI
+          export AWS_CONTAINER_NAME AWS_APP_PORT
+
+          {
+            cat <<'COMPOSE_TOP'
+            services:
+              mongodb:
+                image: ${MONGODB_IMAGE:-mongo:8}
+                container_name: ${MONGODB_CONTAINER_NAME:-judge-mongodb}
+                restart: unless-stopped
+                ports:
+                  - "${MONGODB_PORT:-27017}:27017"
+                environment:
+                  MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USER}
+                  MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD}
+                  MONGO_INITDB_DATABASE: ${MONGODB_DATABASE}
+                volumes:
+                  - mongo_data:/data/db
+                networks:
+                  - app_net
+                healthcheck:
+                  test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+                  interval: 10s
+                  timeout: 5s
+                  retries: 5
+
+              app:
+                image: ${IMAGE_URI}
+                container_name: ${AWS_CONTAINER_NAME}
+                restart: unless-stopped
+                ports:
+                  - "${AWS_APP_PORT}:8080"
+                networks:
+                  - app_net
+                volumes:
+                  - /var/run/docker.sock:/var/run/docker.sock
+                environment:
+            COMPOSE_TOP
+            for key in "${app_env_keys[@]}"; do
+              printf "                  - %s=\${%s}\n" "${key}" "${key}"
+            done
+            cat <<'COMPOSE_BOTTOM'
+            networks:
+              app_net:
+                name: ${APP_DOCKER_NETWORK}
+
+            volumes:
+              mongo_data:
+            COMPOSE_BOTTOM
+          } > "${AWS_APP_DIR}/docker-compose.yml"
 
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-          docker pull "${IMAGE_URI}"
-          docker rm -f "${AWS_CONTAINER_NAME}" || true
-
-          docker run -d \
-            --name "${AWS_CONTAINER_NAME}" \
-            --restart unless-stopped \
-            -p "${AWS_APP_PORT}:8080" \
-            --env-file "${AWS_APP_DIR}/.env" \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            ${AWS_DOCKER_RUN_EXTRA_ARGS:-} \
-            "${IMAGE_URI}"
+          docker compose -f "${AWS_APP_DIR}/docker-compose.yml" pull app
+          docker compose -f "${AWS_APP_DIR}/docker-compose.yml" up -d mongodb app
           EOF

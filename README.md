@@ -179,7 +179,7 @@ curl -s \
 3. app JAR 빌드 후 Docker 이미지(`linux/arm64`)를 ECR에 push
 4. EC2에 SSH 접속
 5. EC2가 자신의 IAM Role로 ECR 로그인 후 이미지 pull
-6. 컨테이너 재생성(run) + `.env` 적용
+6. EC2에서 `docker-compose.yml` 동적 생성 후 `docker compose up -d` 배포
 
 ### 1) AWS OIDC Role 생성 (GitHub Actions용)
 
@@ -254,6 +254,7 @@ EC2 인스턴스 프로파일(Role)에 최소 권한 부여:
 
 EC2 서버 사전 설치:
 - `docker`
+- `docker compose plugin`
 - `aws cli`
 
 ### 4) SNS -> SQS 연결
@@ -279,16 +280,19 @@ EC2 서버 사전 설치:
 - `AWS_GITHUB_ROLE_ARN` (OIDC Assume Role ARN)
 - `AWS_SSH_KNOWN_HOSTS` (선택)
 - `AWS_PORT` (선택, 기본 `22`)
-- `AWS_APP_DIR` (선택, 기본 `/opt/online-judge`)
+- `AWS_APP_DIR` (선택, 기본 `/home/<AWS_USER>/online-judge`)
 - `AWS_CONTAINER_NAME` (선택, 기본 `online-judge`)
 - `AWS_APP_PORT` (선택, 기본 `8080`)
-- `AWS_DOCKER_RUN_EXTRA_ARGS` (선택)
+- `AWS_APP_NETWORK` (선택, 기본 `online-judge-net`)
 - `APP_ENV_VARS` (멀티라인 `KEY=VALUE`)
 - `JUDGE_JWT_AUTH_SIGNING_KEY` (필수)
-- `MONGODB_URI` (권장)
-- `MONGODB_USER` (선택)
-- `MONGODB_PASSWORD` (선택)
-- `MONGODB_DATABASE` (선택)
+- `MONGODB_USER` (필수, Mongo 초기 계정)
+- `MONGODB_PASSWORD` (필수, Mongo 초기 비밀번호)
+- `MONGODB_DATABASE` (필수, 기본 DB명)
+- `MONGODB_URI` (선택, 미설정 시 배포 단계에서 `mongodb` 호스트 기준으로 자동 생성)
+- `MONGODB_PORT` (선택, 기본 `27017`)
+- `MONGODB_IMAGE` (선택, 기본 `mongo:8`)
+- `MONGODB_CONTAINER_NAME` (선택, 기본 `judge-mongodb`)
 - `REDIS_PASSWORD` (선택)
 - `JUDGE_PROBLEM_EVENTS_QUEUE_URL` (선택)
 
@@ -302,7 +306,9 @@ SANDBOX_IMAGE_KOTLIN=<ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/judge-sandbox-kotl
 SANDBOX_IMAGE_DART=<ACCOUNT>.dkr.ecr.<REGION>.amazonaws.com/judge-sandbox-dart:latest
 ```
 
-`APP_ENV_VARS`와 개별 앱 Secret 값들은 배포 시 합쳐져 `${AWS_APP_DIR}/.env`로 배치됩니다.
+`APP_ENV_VARS`와 개별 앱 Secret 값들은 배포 시 Docker Compose 환경변수로 직접 주입됩니다. (`.env` 파일 생성 없음)
+
+배포 시 EC2에서 `${AWS_APP_DIR}/docker-compose.yml`를 동적으로 생성하고, `mongodb` + `app` 서비스를 `docker compose up -d`로 기동합니다. 앱 컨테이너는 동일 네트워크(`AWS_APP_NETWORK`)로 실행됩니다.
 
 ### 6) 배포 실행
 
