@@ -375,5 +375,5 @@ jobs:
             | docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
           docker compose -f "${AWS_APP_DIR}/docker-compose.yml" pull app
-          docker compose -f "${AWS_APP_DIR}/docker-compose.yml" up -d mongodb redis app
+          docker compose -f "${AWS_APP_DIR}/docker-compose.yml" up -d --force-recreate mongodb redis app
           EOF
