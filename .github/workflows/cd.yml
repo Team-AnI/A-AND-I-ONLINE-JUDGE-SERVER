@@ -278,8 +278,6 @@ jobs:
           append_runtime_env "MONGODB_PORT" "${MONGODB_PORT}"
           append_runtime_env "MONGODB_IMAGE" "${MONGODB_IMAGE}"
           append_runtime_env "MONGODB_CONTAINER_NAME" "${MONGODB_CONTAINER_NAME}"
-          append_runtime_env "REDIS_IMAGE" "${REDIS_IMAGE}"
-          append_runtime_env "REDIS_CONTAINER_NAME" "${REDIS_CONTAINER_NAME}"
           append_runtime_env "REDIS_PASSWORD" "${REDIS_PASSWORD}"
           append_runtime_env "JUDGE_PROBLEM_EVENTS_QUEUE_URL" "${JUDGE_PROBLEM_EVENTS_QUEUE_URL}"
 
