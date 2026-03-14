@@ -6,9 +6,9 @@ spring:
 
   data:
     mongodb:
-      uri: ${MONGODB_URI:mongodb://judge:judge123@localhost:27017/online_judge?authSource=admin}
+      uri: ${MONGODB_URI:mongodb://judge:judge123@mongodb:27017/online_judge?authSource=admin}
     redis:
-      host: ${REDIS_HOST:localhost}
+      host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
 
 server:
