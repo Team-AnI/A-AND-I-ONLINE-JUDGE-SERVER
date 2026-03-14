@@ -5,6 +5,7 @@ import com.aandiclub.online.judge.api.dto.SubmissionRequest
 import com.aandiclub.online.judge.api.dto.SubmissionResult
 import com.aandiclub.online.judge.logging.SubmissionMdc
 import com.aandiclub.online.judge.service.SubmissionService
+import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import jakarta.validation.Valid
 import kotlinx.coroutines.flow.Flow
 import org.slf4j.LoggerFactory
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/v1/submissions")
+@SecurityRequirement(name = "bearerAuth")
 class SubmissionController(
     private val submissionService: SubmissionService,
 ) {

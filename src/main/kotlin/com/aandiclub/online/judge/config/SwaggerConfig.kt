@@ -1,5 +1,7 @@
 package com.aandiclub.online.judge.config
 
+import io.swagger.v3.oas.annotations.enums.SecuritySchemeType
+import io.swagger.v3.oas.annotations.security.SecurityScheme
 import io.swagger.v3.oas.models.servers.Server
 import org.springdoc.core.customizers.OpenApiCustomizer
 import org.springframework.boot.context.properties.ConfigurationProperties
@@ -13,6 +15,12 @@ data class OpenApiProperties(
 )
 
 @Configuration
+@SecurityScheme(
+    name = "bearerAuth",
+    type = SecuritySchemeType.HTTP,
+    scheme = "bearer",
+    bearerFormat = "JWT",
+)
 @EnableConfigurationProperties(OpenApiProperties::class)
 class SwaggerConfig(
     private val openApiProperties: OpenApiProperties,
