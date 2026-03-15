@@ -7,9 +7,21 @@ import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.servers.Server
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class SwaggerConfigTest {
+
+    @Test
+    fun `base openapi exposes descriptive info and tags`() {
+        val openApi = SwaggerConfig(
+            OpenApiProperties(serverUrl = ""),
+        ).baseOpenApi()
+
+        assertEquals("AANDI Club Online Judge API", openApi.info.title)
+        assertTrue(openApi.info.description.contains("Asynchronous online judge API"))
+        assertEquals(listOf("Submissions"), openApi.tags.map { it.name })
+    }
 
     @Test
     fun `public server url overrides generated servers`() {
