@@ -59,6 +59,8 @@ judge:
     window-seconds: ${JUDGE_RATE_LIMIT_WINDOW_SECONDS:60}
   worker:
     max-concurrency: ${JUDGE_WORKER_MAX_CONCURRENCY:2}
+  submission:
+    dedup-ttl-minutes: ${JUDGE_SUBMISSION_DEDUP_TTL_MINUTES:5}
   problem-events:
     enabled: ${JUDGE_PROBLEM_EVENTS_ENABLED:false}
     queue-url: ${JUDGE_PROBLEM_EVENTS_QUEUE_URL:}

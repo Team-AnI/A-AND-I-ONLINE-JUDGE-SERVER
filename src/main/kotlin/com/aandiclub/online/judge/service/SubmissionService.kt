@@ -29,6 +29,8 @@ import org.springframework.http.codec.ServerSentEvent
 import org.springframework.stereotype.Service
 import org.springframework.web.server.ResponseStatusException
 import tools.jackson.databind.ObjectMapper
+import java.security.MessageDigest
+import java.time.Duration
 
 @Service
 class SubmissionService(
@@ -39,13 +41,37 @@ class SubmissionService(
     private val judgeWorkerScope: CoroutineScope,
     private val judgeWorkerSemaphore: Semaphore,
     private val objectMapper: ObjectMapper,
+    private val submissionProperties: com.aandiclub.online.judge.config.SubmissionProperties,
 ) {
     private val log = LoggerFactory.getLogger(SubmissionService::class.java)
+
+    private fun computeCodeHash(code: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hashBytes = digest.digest(code.toByteArray())
+        return hashBytes.joinToString("") { "%02x".format(it) }
+    }
 
     suspend fun createSubmission(
         request: SubmissionRequest,
         submitterId: String,
     ): SubmissionAccepted {
+        // Check for duplicate submission within 5 minutes
+        val codeHash = computeCodeHash(request.code)
+        val dedupKey = "submission:dedup:$submitterId:${request.problemId}:${request.language}:$codeHash"
+
+        val cachedSubmissionId = redisTemplate.opsForValue()
+            .get(dedupKey)
+            .awaitSingleOrNull()
+
+        if (cachedSubmissionId != null) {
+            log.info("Duplicate submission detected, returning cached submissionId: {}", cachedSubmissionId)
+            return SubmissionAccepted(
+                submissionId = cachedSubmissionId,
+                streamUrl = "/v1/submissions/$cachedSubmissionId/stream",
+            )
+        }
+
+        // Create new submission
         val submission = Submission(
             submitterId = submitterId,
             submitterPublicCode = request.publicCode,
@@ -57,6 +83,11 @@ class SubmissionService(
         SubmissionMdc.withSubmissionId(saved.id) {
             log.info("Submission created: language={}", saved.language)
         }
+
+        // Cache the submission ID to prevent duplicates
+        redisTemplate.opsForValue()
+            .set(dedupKey, saved.id, Duration.ofMinutes(submissionProperties.dedupTtlMinutes))
+            .awaitSingle()
 
         judgeWorkerScope.launch(Dispatchers.IO + SubmissionMdc.context(saved.id)) {
             judgeWorkerSemaphore.withPermit {

@@ -33,7 +33,9 @@ import org.springframework.web.server.ResponseStatusException
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import tools.jackson.databind.ObjectMapper
+import java.time.Duration
 import java.time.Instant
+import org.springframework.data.redis.core.ReactiveValueOperations
 
 class SubmissionServiceTest {
 
@@ -44,6 +46,7 @@ class SubmissionServiceTest {
     private val judgeWorkerScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
     private val judgeWorkerSemaphore = Semaphore(2)
     private val objectMapper = ObjectMapper()
+    private val submissionProperties = com.aandiclub.online.judge.config.SubmissionProperties(dedupTtlMinutes = 5)
 
     private val service = SubmissionService(
         submissionRepository,
@@ -53,6 +56,7 @@ class SubmissionServiceTest {
         judgeWorkerScope,
         judgeWorkerSemaphore,
         objectMapper,
+        submissionProperties,
     )
 
     @Test
@@ -73,6 +77,11 @@ class SubmissionServiceTest {
         )
 
         val savedSlot = slot<Submission>()
+        val valueOps = mockk<org.springframework.data.redis.core.ReactiveValueOperations<String, String>>(relaxed = true)
+
+        every { redisTemplate.opsForValue() } returns valueOps
+        every { valueOps.get(any()) } returns Mono.empty()
+        every { valueOps.set(any(), any(), any<java.time.Duration>()) } returns Mono.just(true)
         every { submissionRepository.save(capture(savedSlot)) } returns Mono.just(savedSubmission)
 
         val result = service.createSubmission(request, "user-1")
@@ -80,7 +89,7 @@ class SubmissionServiceTest {
         assertEquals("saved-uuid", result.submissionId)
         assertEquals("/v1/submissions/saved-uuid/stream", result.streamUrl)
         verify(exactly = 1) { submissionRepository.save(any()) }
-        coVerify(timeout = 1_000, exactly = 1) { judgeWorker.execute(match { it.id == "saved-uuid" }, any()) }
+        coVerify(timeout = 1_000, exactly = 1) { judgeWorker.execute(match { it.id == "saved-uuid" }) }
         assertEquals("user-1", savedSlot.captured.submitterId)
         assertEquals("A00123", savedSlot.captured.submitterPublicCode)
         assertEquals(SubmissionStatus.PENDING, savedSlot.captured.status)
@@ -291,5 +300,59 @@ class SubmissionServiceTest {
         assertEquals(1, events.size)
         assertEquals("test_case_result", events[0].event())
         assertEquals(payload, events[0].data())
+    }
+
+    @Test
+    fun `createSubmission returns cached submission for duplicate within 5 minutes`() = runTest {
+        val request = SubmissionRequest(
+            publicCode = "A00123",
+            problemId = "quiz-101",
+            language = Language.PYTHON,
+            code = "def solution(a, b): return a + b",
+        )
+        val cachedSubmissionId = "cached-uuid"
+        val valueOps = mockk<org.springframework.data.redis.core.ReactiveValueOperations<String, String>>()
+
+        every { redisTemplate.opsForValue() } returns valueOps
+        every { valueOps.get(any()) } returns Mono.just(cachedSubmissionId)
+
+        val result = service.createSubmission(request, "user-1")
+
+        assertEquals(cachedSubmissionId, result.submissionId)
+        assertEquals("/v1/submissions/$cachedSubmissionId/stream", result.streamUrl)
+        verify(exactly = 0) { submissionRepository.save(any()) }
+        coVerify(exactly = 0) { judgeWorker.execute(any()) }
+    }
+
+    @Test
+    fun `createSubmission creates new submission and caches when no duplicate exists`() = runTest {
+        val request = SubmissionRequest(
+            publicCode = "A00123",
+            problemId = "quiz-101",
+            language = Language.PYTHON,
+            code = "def solution(a, b): return a + b",
+        )
+        val savedSubmission = Submission(
+            id = "new-uuid",
+            submitterId = "user-1",
+            submitterPublicCode = "A00123",
+            problemId = "quiz-101",
+            language = Language.PYTHON,
+            code = "def solution(a, b): return a + b",
+        )
+        val valueOps = mockk<org.springframework.data.redis.core.ReactiveValueOperations<String, String>>(relaxed = true)
+
+        every { redisTemplate.opsForValue() } returns valueOps
+        every { valueOps.get(any()) } returns Mono.empty()
+        every { valueOps.set(any(), any(), any<java.time.Duration>()) } returns Mono.just(true)
+        every { submissionRepository.save(any()) } returns Mono.just(savedSubmission)
+
+        val result = service.createSubmission(request, "user-1")
+
+        assertEquals("new-uuid", result.submissionId)
+        assertEquals("/v1/submissions/new-uuid/stream", result.streamUrl)
+        verify(exactly = 1) { submissionRepository.save(any()) }
+        verify(exactly = 1) { valueOps.set(any(), eq("new-uuid"), any<java.time.Duration>()) }
+        coVerify(timeout = 1_000, exactly = 1) { judgeWorker.execute(match { it.id == "new-uuid" }) }
     }
 }

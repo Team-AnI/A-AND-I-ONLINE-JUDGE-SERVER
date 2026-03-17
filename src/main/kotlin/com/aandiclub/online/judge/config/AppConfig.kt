@@ -38,6 +38,7 @@ data class WorkerProperties(
     JwtAuthProperties::class,
     RateLimitProperties::class,
     WorkerProperties::class,
+    SubmissionProperties::class,
 )
 class AppConfig {
 
