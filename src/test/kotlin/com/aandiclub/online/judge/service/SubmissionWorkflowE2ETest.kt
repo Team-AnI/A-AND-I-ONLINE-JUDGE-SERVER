@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
@@ -29,6 +30,7 @@ import org.springframework.test.web.reactive.server.WebTestClient
 import org.testcontainers.containers.MongoDBContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
+import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import java.util.concurrent.atomic.AtomicInteger
@@ -51,6 +53,9 @@ class SubmissionWorkflowE2ETest {
     @Autowired
     private lateinit var submissionRepository: SubmissionRepository
 
+    @Autowired
+    private lateinit var userRepository: com.aandiclub.online.judge.repository.UserRepository
+
     @MockkBean
     private lateinit var sandboxRunner: SandboxRunner
 
@@ -66,6 +71,14 @@ class SubmissionWorkflowE2ETest {
     @BeforeEach
     fun setup() {
         submissionRepository.deleteAll().block()
+        userRepository.deleteAll().block()
+        userRepository.save(
+            com.aandiclub.online.judge.domain.User(
+                userId = "anonymous",
+                publicCode = "A00123",
+                username = "anonymous",
+            )
+        ).block()
 
         // Mock Redis operations for deduplication
         val valueOps = io.mockk.mockk<org.springframework.data.redis.core.ReactiveValueOperations<String, String>>()
