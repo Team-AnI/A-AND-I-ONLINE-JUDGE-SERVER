@@ -9,7 +9,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
-import java.time.Instant
+import java.time.OffsetDateTime
 
 class AdminTestCaseControllerTest {
     private val problemService = mockk<ProblemService>()
@@ -36,7 +36,7 @@ class AdminTestCaseControllerTest {
                         expectedOutputType = "INTEGER",
                     ),
                 ),
-                updatedAt = Instant.parse("2026-03-15T10:00:00Z"),
+                updatedAt = OffsetDateTime.parse("2026-03-15T19:00:00+09:00"),
             ),
             ProblemTestCaseRecord(
                 problemId = "quiz-102",
@@ -49,7 +49,7 @@ class AdminTestCaseControllerTest {
                         expectedOutputType = "STRING",
                     ),
                 ),
-                updatedAt = Instant.parse("2026-03-15T11:00:00Z"),
+                updatedAt = OffsetDateTime.parse("2026-03-15T20:00:00+09:00"),
             ),
         )
         coEvery { problemService.getAllProblemsWithTestCases() } returns records

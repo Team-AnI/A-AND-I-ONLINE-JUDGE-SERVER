@@ -1,8 +1,7 @@
 package com.aandiclub.online.judge.api.dto
 
 import io.swagger.v3.oas.annotations.media.Schema
-import tools.jackson.databind.annotation.JsonSerialize
-import java.time.Instant
+import java.time.OffsetDateTime
 
 @Schema(description = "Response containing test cases for a specific problem")
 data class ProblemTestCaseRecord(
@@ -13,8 +12,7 @@ data class ProblemTestCaseRecord(
     val testCases: List<AdminTestCaseRecord>,
 
     @Schema(description = "Last update timestamp for this problem's test cases", example = "2026-03-15T19:00:00+09:00")
-    @field:JsonSerialize(using = KstInstantSerializer::class)
-    val updatedAt: Instant,
+    val updatedAt: OffsetDateTime,
 )
 
 @Schema(description = "Administrative test case view with inferred runtime value types.")

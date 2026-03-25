@@ -31,6 +31,9 @@ import org.springframework.web.server.ResponseStatusException
 import tools.jackson.databind.ObjectMapper
 import java.security.MessageDigest
 import java.time.Duration
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneId
 
 @Service
 class SubmissionService(
@@ -174,8 +177,8 @@ class SubmissionService(
                     language = submission.language,
                     status = submission.status,
                     testCases = submission.testCaseResults,
-                    createdAt = submission.createdAt,
-                    completedAt = submission.completedAt,
+                    createdAt = submission.createdAt.toKstOffsetDateTime(),
+                    completedAt = submission.completedAt?.toKstOffsetDateTime(),
                 )
             }
 
@@ -193,10 +196,17 @@ class SubmissionService(
                     code = submission.code,
                     status = submission.status,
                     testCases = submission.testCaseResults,
-                    createdAt = submission.createdAt,
-                    completedAt = submission.completedAt,
+                    createdAt = submission.createdAt.toKstOffsetDateTime(),
+                    completedAt = submission.completedAt?.toKstOffsetDateTime(),
                 )
             }
+
+    private fun Instant.toKstOffsetDateTime(): OffsetDateTime =
+        atZone(KST_ZONE_ID).toOffsetDateTime()
+
+    companion object {
+        private val KST_ZONE_ID: ZoneId = ZoneId.of("Asia/Seoul")
+    }
 
     private suspend fun requireAuthorizedSubmission(
         submissionId: String,

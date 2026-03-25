@@ -10,7 +10,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
-import java.time.Instant
+import java.time.OffsetDateTime
 
 class AdminSubmissionControllerTest {
     private val submissionService = mockk<SubmissionService>()
@@ -28,8 +28,8 @@ class AdminSubmissionControllerTest {
                 code = "fun solution(a: Int, b: Int): Int = a + b",
                 status = SubmissionStatus.ACCEPTED,
                 testCases = emptyList(),
-                createdAt = Instant.parse("2026-03-15T10:00:00Z"),
-                completedAt = Instant.parse("2026-03-15T10:00:01Z"),
+                createdAt = OffsetDateTime.parse("2026-03-15T19:00:00+09:00"),
+                completedAt = OffsetDateTime.parse("2026-03-15T19:00:01+09:00"),
             )
         )
         coEvery { submissionService.getAllSubmissions() } returns records

@@ -7,6 +7,9 @@ import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneId
 
 @Service
 class ProblemService(
@@ -28,9 +31,16 @@ class ProblemService(
                             expectedOutputType = inferValueType(testCase.expectedOutput),
                         )
                     },
-                    updatedAt = problem.updatedAt,
+                    updatedAt = problem.updatedAt.toKstOffsetDateTime(),
                 )
             }
+
+    private fun Instant.toKstOffsetDateTime(): OffsetDateTime =
+        atZone(KST_ZONE_ID).toOffsetDateTime()
+
+    companion object {
+        private val KST_ZONE_ID: ZoneId = ZoneId.of("Asia/Seoul")
+    }
 
     private fun inferValueType(value: Any?): String = when (value) {
         null -> "NULL"

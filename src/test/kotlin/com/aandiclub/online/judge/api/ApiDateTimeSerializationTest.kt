@@ -11,7 +11,7 @@ import io.mockk.coEvery
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
 import org.springframework.test.web.reactive.server.WebTestClient
-import java.time.Instant
+import java.time.OffsetDateTime
 
 class ApiDateTimeSerializationTest {
     private val submissionService = mockk<SubmissionService>()
@@ -35,8 +35,8 @@ class ApiDateTimeSerializationTest {
                 code = "fun solution(a: Int, b: Int): Int = a + b",
                 status = SubmissionStatus.ACCEPTED,
                 testCases = emptyList(),
-                createdAt = Instant.parse("2026-03-15T10:00:00Z"),
-                completedAt = Instant.parse("2026-03-15T10:00:02Z"),
+                createdAt = OffsetDateTime.parse("2026-03-15T19:00:00+09:00"),
+                completedAt = OffsetDateTime.parse("2026-03-15T19:00:02+09:00"),
             )
         )
 
@@ -63,7 +63,7 @@ class ApiDateTimeSerializationTest {
                         expectedOutputType = "INTEGER",
                     )
                 ),
-                updatedAt = Instant.parse("2026-03-15T10:00:00Z"),
+                updatedAt = OffsetDateTime.parse("2026-03-15T19:00:00+09:00"),
             )
         )
 

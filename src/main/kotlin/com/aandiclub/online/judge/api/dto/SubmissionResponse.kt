@@ -5,8 +5,7 @@ import com.aandiclub.online.judge.domain.SubmissionStatus
 import com.aandiclub.online.judge.domain.TestCaseResult
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
-import tools.jackson.databind.annotation.JsonSerialize
-import java.time.Instant
+import java.time.OffsetDateTime
 
 @Schema(
     name = "SubmissionAccepted",
@@ -79,15 +78,13 @@ data class MyProblemSubmissionRecord(
         description = "When the submission was created.",
         example = "2026-03-15T12:21:00+09:00",
     )
-    @field:JsonSerialize(using = KstInstantSerializer::class)
-    val createdAt: Instant,
+    val createdAt: OffsetDateTime,
     @field:Schema(
         description = "When judging completed, if it has completed.",
         example = "2026-03-15T12:21:02+09:00",
         nullable = true,
     )
-    @field:JsonSerialize(using = KstInstantSerializer::class)
-    val completedAt: Instant?,
+    val completedAt: OffsetDateTime?,
 )
 
 @Schema(
@@ -137,13 +134,11 @@ data class AdminSubmissionRecord(
         description = "When the submission was created.",
         example = "2026-03-15T12:21:00+09:00",
     )
-    @field:JsonSerialize(using = KstInstantSerializer::class)
-    val createdAt: Instant,
+    val createdAt: OffsetDateTime,
     @field:Schema(
         description = "When judging completed, if it has completed.",
         example = "2026-03-15T12:21:02+09:00",
         nullable = true,
     )
-    @field:JsonSerialize(using = KstInstantSerializer::class)
-    val completedAt: Instant?,
+    val completedAt: OffsetDateTime?,
 )

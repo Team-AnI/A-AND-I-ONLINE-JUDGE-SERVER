@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest
 import org.springframework.mock.web.server.MockServerWebExchange
-import java.time.Instant
+import java.time.OffsetDateTime
 
 class ProblemSubmissionControllerTest {
     private val submissionService = mockk<SubmissionService>()
@@ -30,8 +30,8 @@ class ProblemSubmissionControllerTest {
                 language = Language.KOTLIN,
                 status = SubmissionStatus.ACCEPTED,
                 testCases = emptyList(),
-                createdAt = Instant.parse("2026-03-15T10:00:00Z"),
-                completedAt = Instant.parse("2026-03-15T10:00:01Z"),
+                createdAt = OffsetDateTime.parse("2026-03-15T19:00:00+09:00"),
+                completedAt = OffsetDateTime.parse("2026-03-15T19:00:01+09:00"),
             )
         )
         coEvery { submissionService.getProblemSubmissions("quiz-101", "user-1") } returns records

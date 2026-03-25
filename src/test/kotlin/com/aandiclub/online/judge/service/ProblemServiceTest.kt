@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import reactor.core.publisher.Flux
 import java.time.Instant
+import java.time.OffsetDateTime
 
 class ProblemServiceTest {
     private val problemRepository = mockk<ProblemRepository>()
@@ -36,5 +37,6 @@ class ProblemServiceTest {
         assertEquals(1, result.size)
         assertEquals(listOf("INTEGER", "DECIMAL", "STRING", "BOOLEAN", "NULL"), result[0].testCases[0].argTypes)
         assertEquals("OBJECT", result[0].testCases[0].expectedOutputType)
+        assertEquals(OffsetDateTime.parse("2026-03-24T09:00:00+09:00"), result[0].updatedAt)
     }
 }

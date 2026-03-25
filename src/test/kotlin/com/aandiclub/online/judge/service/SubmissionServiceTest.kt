@@ -35,6 +35,7 @@ import reactor.core.publisher.Mono
 import tools.jackson.databind.ObjectMapper
 import java.time.Duration
 import java.time.Instant
+import java.time.OffsetDateTime
 import org.springframework.data.redis.core.ReactiveValueOperations
 
 class SubmissionServiceTest {
@@ -235,8 +236,8 @@ class SubmissionServiceTest {
                     language = Language.KOTLIN,
                     status = SubmissionStatus.ACCEPTED,
                     testCases = emptyList(),
-                    createdAt = Instant.parse("2026-03-15T10:00:00Z"),
-                    completedAt = Instant.parse("2026-03-15T10:00:01Z"),
+                    createdAt = OffsetDateTime.parse("2026-03-15T19:00:00+09:00"),
+                    completedAt = OffsetDateTime.parse("2026-03-15T19:00:01+09:00"),
                 ),
                 MyProblemSubmissionRecord(
                     submissionId = "sub-old",
@@ -244,8 +245,8 @@ class SubmissionServiceTest {
                     language = Language.PYTHON,
                     status = SubmissionStatus.WRONG_ANSWER,
                     testCases = emptyList(),
-                    createdAt = Instant.parse("2026-03-15T09:00:00Z"),
-                    completedAt = Instant.parse("2026-03-15T09:00:05Z"),
+                    createdAt = OffsetDateTime.parse("2026-03-15T18:00:00+09:00"),
+                    completedAt = OffsetDateTime.parse("2026-03-15T18:00:05+09:00"),
                 ),
             ),
             result
@@ -280,8 +281,8 @@ class SubmissionServiceTest {
                     code = "fun solution(a: Int, b: Int): Int = a + b",
                     status = SubmissionStatus.ACCEPTED,
                     testCases = emptyList(),
-                    createdAt = Instant.parse("2026-03-15T10:00:00Z"),
-                    completedAt = Instant.parse("2026-03-15T10:00:01Z"),
+                    createdAt = OffsetDateTime.parse("2026-03-15T19:00:00+09:00"),
+                    completedAt = OffsetDateTime.parse("2026-03-15T19:00:01+09:00"),
                 ),
             ),
             result
