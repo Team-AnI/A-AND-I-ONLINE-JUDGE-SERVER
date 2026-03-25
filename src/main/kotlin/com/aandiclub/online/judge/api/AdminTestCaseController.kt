@@ -43,7 +43,7 @@ class AdminTestCaseController(
                         examples = [
                             ExampleObject(
                                 name = "testcase-list",
-                                value = """[{"problemId":"quiz-101","testCases":[{"caseId":1,"args":[3,5],"argTypes":["INTEGER","INTEGER"],"expectedOutput":8,"expectedOutputType":"INTEGER"},{"caseId":2,"args":[10,20],"argTypes":["INTEGER","INTEGER"],"expectedOutput":30,"expectedOutputType":"INTEGER"}],"updatedAt":"2026-03-15T10:00:00Z"}]""",
+                                value = """[{"problemId":"quiz-101","testCases":[{"caseId":1,"args":[3,5],"argTypes":["INTEGER","INTEGER"],"expectedOutput":8,"expectedOutputType":"INTEGER"},{"caseId":2,"args":[10,20],"argTypes":["INTEGER","INTEGER"],"expectedOutput":30,"expectedOutputType":"INTEGER"}],"updatedAt":"2026-03-15T19:00:00+09:00"}]""",
                             ),
                         ],
                     ),
