@@ -80,11 +80,27 @@ fun main() {
 
 fun buildArgsLiteral(argsJson: JSONArray): String =
     (0 until argsJson.length()).joinToString(", ") { i ->
-        when (val arg = argsJson.get(i)) {
-            is String -> "\"${arg.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-            else -> arg.toString()
-        }
+        toLiteral(argsJson.get(i))
     }
+
+fun toLiteral(value: Any?): String = when (value) {
+    null, JSONObject.NULL -> "null"
+    is String -> "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+    is Number, is Boolean -> value.toString()
+    is JSONArray -> {
+        val elements = (0 until value.length()).joinToString(", ") { toLiteral(value.get(it)) }
+        "listOf($elements)"
+    }
+    is JSONObject -> {
+        val entries = value.keys().asSequence().joinToString(", ") { key ->
+            val k = "\"${key.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+            val v = toLiteral(value.get(key))
+            "$k to $v"
+        }
+        "mapOf($entries)"
+    }
+    else -> value.toString()
+}
 
 /** Generates Solution.kt source: user code + main() that writes result to a file. */
 fun buildSolutionSource(code: String, argsLiteral: String, resultFilePath: String): String {
