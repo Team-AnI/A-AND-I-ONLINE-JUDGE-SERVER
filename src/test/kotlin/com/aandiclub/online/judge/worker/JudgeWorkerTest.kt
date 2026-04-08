@@ -14,6 +14,7 @@ import com.aandiclub.online.judge.repository.SubmissionRepository
 import com.aandiclub.online.judge.sandbox.SandboxInput
 import com.aandiclub.online.judge.sandbox.SandboxOutput
 import com.aandiclub.online.judge.sandbox.SandboxRunner
+import com.aandiclub.online.judge.service.SubmissionEventPublisher
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -33,6 +34,7 @@ class JudgeWorkerTest {
     private val redisTemplate = mockk<ReactiveStringRedisTemplate>()
     private val objectMapper = ObjectMapper()
     private val sandboxProperties = SandboxProperties(memoryLimitMb = 128)
+    private val submissionEventPublisher = mockk<SubmissionEventPublisher>(relaxed = true)
     private val problemCatalogProperties = ProblemCatalogProperties(
         items = mapOf(
             "quiz-101" to ProblemItem(
@@ -49,6 +51,7 @@ class JudgeWorkerTest {
         sandboxProperties = sandboxProperties,
         problemRepository = problemRepository,
         problemCatalogProperties = problemCatalogProperties,
+        submissionEventPublisher = submissionEventPublisher,
     )
 
     init {
@@ -94,6 +97,14 @@ class JudgeWorkerTest {
             redisTemplate.convertAndSend(
                 "submission:sub-1",
                 match { it.contains("\"event\":\"done\"") && it.contains("\"overallStatus\":\"ACCEPTED\"") }
+            )
+        }
+        coVerify(exactly = 1) {
+            submissionEventPublisher.publishJudgeCompleted(
+                publicCode = "A00123",
+                problemId = "quiz-101",
+                testCases = testCases,
+                results = match { it.size == 1 && it.first().status == TestCaseStatus.PASSED },
             )
         }
     }

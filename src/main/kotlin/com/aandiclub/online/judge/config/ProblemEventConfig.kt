@@ -25,6 +25,12 @@ data class UserEventProperties(
     val maxMessages: Int = 10,
 )
 
+@ConfigurationProperties(prefix = "judge.submission-events")
+data class SubmissionEventProperties(
+    val publishEnabled: Boolean = false,
+    val topicArn: String = "",
+)
+
 @Configuration
 class ProblemEventConfig {
 
@@ -46,7 +52,11 @@ class ProblemEventConfig {
     )
     fun userEventSqsClient(): SqsClient = SqsClient.create()
 
-    @Bean
+    @Bean("problemSnsClient")
     @ConditionalOnProperty(prefix = "judge.problem-events", name = ["publishEnabled"], havingValue = "true")
-    fun snsClient(): SnsClient = SnsClient.create()
+    fun problemSnsClient(): SnsClient = SnsClient.create()
+
+    @Bean("submissionSnsClient")
+    @ConditionalOnProperty(prefix = "judge.submission-events", name = ["publishEnabled"], havingValue = "true")
+    fun submissionSnsClient(): SnsClient = SnsClient.create()
 }

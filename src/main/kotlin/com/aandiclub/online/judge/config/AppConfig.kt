@@ -40,6 +40,7 @@ data class WorkerProperties(
     RateLimitProperties::class,
     WorkerProperties::class,
     SubmissionProperties::class,
+    SubmissionEventProperties::class,
 )
 class AppConfig {
 

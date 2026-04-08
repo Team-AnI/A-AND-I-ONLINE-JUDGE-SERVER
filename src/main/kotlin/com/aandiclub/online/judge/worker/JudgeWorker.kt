@@ -12,6 +12,7 @@ import com.aandiclub.online.judge.repository.ProblemRepository
 import com.aandiclub.online.judge.repository.SubmissionRepository
 import com.aandiclub.online.judge.sandbox.SandboxInput
 import com.aandiclub.online.judge.sandbox.SandboxRunner
+import com.aandiclub.online.judge.service.SubmissionEventPublisher
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
@@ -31,6 +32,7 @@ class JudgeWorker(
     private val sandboxProperties: SandboxProperties,
     private val problemRepository: ProblemRepository,
     private val problemCatalogProperties: ProblemCatalogProperties,
+    private val submissionEventPublisher: SubmissionEventPublisher?,
 ) {
     private val log = LoggerFactory.getLogger(JudgeWorker::class.java)
 
@@ -66,6 +68,12 @@ class JudgeWorker(
                 )
             )
             redisTemplate.convertAndSend(channel, donePayload).awaitSingle()
+            submissionEventPublisher?.publishJudgeCompleted(
+                publicCode = submission.submitterPublicCode,
+                problemId = submission.problemId,
+                testCases = resolvedTestCases,
+                results = submission.testCaseResults,
+            )
             return@withContext
         }
 
@@ -113,6 +121,12 @@ class JudgeWorker(
             )
         )
         redisTemplate.convertAndSend(channel, donePayload).awaitSingle()
+        submissionEventPublisher?.publishJudgeCompleted(
+            publicCode = submission.submitterPublicCode,
+            problemId = submission.problemId,
+            testCases = resolvedTestCases,
+            results = results,
+        )
         Unit
     }
 

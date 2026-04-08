@@ -4,6 +4,7 @@ import com.aandiclub.online.judge.config.ProblemEventProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Service
 import software.amazon.awssdk.services.sns.SnsClient
@@ -14,7 +15,7 @@ import java.time.Instant
 @Service
 @ConditionalOnProperty(prefix = "judge.problem-events", name = ["publishEnabled"], havingValue = "true")
 class TestCaseEventPublisher(
-    private val snsClient: SnsClient,
+    @Qualifier("problemSnsClient") private val snsClient: SnsClient,
     private val properties: ProblemEventProperties,
     private val objectMapper: ObjectMapper,
 ) {
