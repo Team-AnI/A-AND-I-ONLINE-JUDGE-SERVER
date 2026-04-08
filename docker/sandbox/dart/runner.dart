@@ -1,6 +1,16 @@
 import 'dart:io';
 import 'dart:convert';
 
+String _toLiteral(dynamic a) {
+  if (a == null) return 'null';
+  if (a is String) return "'${a.replaceAll(r'\', r'\\').replaceAll("'", r"\'")}'" ;
+  if (a is List) return '[${a.map(_toLiteral).join(', ')}]';
+  if (a is Map) return '{${a.entries.map((e) => "'${e.key}': ${_toLiteral(e.value)}").join(', ')}}';
+  return a.toString();
+}
+
+String toArgsLiteral(List<dynamic> args) => args.map(_toLiteral).join(', ');
+
 void main() async {
   String raw;
   try {
@@ -25,10 +35,7 @@ void main() async {
   final sourceFile = File('${tmpDir.path}/solution.dart');
   final resultFile = File('${tmpDir.path}/result.txt');
 
-  final argsLiteral = args.map((a) {
-    if (a is String) return '"${a.replaceAll(r'\', r'\\').replaceAll('"', r'\"')}"';
-    return a.toString();
-  }).join(', ');
+  final argsLiteral = toArgsLiteral(args);
 
   // Escape single quotes in the result file path for embedding in Dart string literal
   final safeResultPath = resultFile.path.replaceAll(r'\', r'\\').replaceAll("'", r"\'");

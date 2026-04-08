@@ -1,6 +1,7 @@
 package com.aandiclub.online.judge.service
 
 import com.aandiclub.online.judge.domain.Problem
+import com.aandiclub.online.judge.domain.ProblemMetadata
 import com.aandiclub.online.judge.repository.ProblemRepository
 import io.mockk.coVerify
 import io.mockk.every
@@ -9,7 +10,9 @@ import io.mockk.slot
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import reactor.core.publisher.Mono
 import tools.jackson.databind.ObjectMapper
 
@@ -168,5 +171,91 @@ class ProblemEventSyncServiceTest {
         assertEquals(ProblemEventSyncOutcome.UPSERTED, outcome)
         assertEquals(listOf(1, 2.5, true, null, listOf(1, 2), mapOf("label" to "sum"), "hello", "01"), savedSlot.captured.testCases[0].args)
         assertEquals(3, savedSlot.captured.testCases[0].expectedOutput)
+    }
+
+    @Test
+    fun `sync stores score per test case`() = runTest {
+        val savedSlot = slot<Problem>()
+        every { problemRepository.save(capture(savedSlot)) } answers { Mono.just(firstArg()) }
+
+        val raw = """
+            {
+              "eventType":"PROBLEM_CREATED",
+              "problemId":"prob-score-1",
+              "testCases":[
+                {"caseId":1,"input":[1,2],"output":3,"score":30},
+                {"caseId":2,"input":[4,5],"output":9,"score":70}
+              ]
+            }
+        """.trimIndent()
+
+        val outcome = service.sync(raw)
+
+        assertEquals(ProblemEventSyncOutcome.UPSERTED, outcome)
+        assertEquals(30, savedSlot.captured.testCases[0].score)
+        assertEquals(70, savedSlot.captured.testCases[1].score)
+    }
+
+    @Test
+    fun `sync stores metadata with courseId and time window`() = runTest {
+        val savedSlot = slot<Problem>()
+        every { problemRepository.save(capture(savedSlot)) } answers { Mono.just(firstArg()) }
+
+        val raw = """
+            {
+              "eventType":"PROBLEM_CREATED",
+              "problemId":"prob-meta-1",
+              "metadata":{
+                "courseId":"course-abc",
+                "startAt":"2025-06-01T09:00:00Z",
+                "endAt":"2025-06-01T18:00:00Z"
+              },
+              "testCases":[{"caseId":1,"input":[1],"output":1}]
+            }
+        """.trimIndent()
+
+        val outcome = service.sync(raw)
+
+        assertEquals(ProblemEventSyncOutcome.UPSERTED, outcome)
+        val meta = savedSlot.captured.metadata
+        assertEquals("course-abc", meta?.courseId)
+        assertEquals(Instant.parse("2025-06-01T09:00:00Z"), meta?.startAt)
+        assertEquals(Instant.parse("2025-06-01T18:00:00Z"), meta?.endAt)
+    }
+
+    @Test
+    fun `sync stores null metadata when metadata field is absent`() = runTest {
+        val savedSlot = slot<Problem>()
+        every { problemRepository.save(capture(savedSlot)) } answers { Mono.just(firstArg()) }
+
+        val raw = """
+            {
+              "eventType":"PROBLEM_CREATED",
+              "problemId":"prob-no-meta",
+              "testCases":[{"caseId":1,"input":[1],"output":1}]
+            }
+        """.trimIndent()
+
+        service.sync(raw)
+
+        assertNull(savedSlot.captured.metadata)
+    }
+
+    @Test
+    fun `sync defaults score to 0 when score field is absent`() = runTest {
+        val savedSlot = slot<Problem>()
+        every { problemRepository.save(capture(savedSlot)) } answers { Mono.just(firstArg()) }
+
+        val raw = """
+            {
+              "eventType":"PROBLEM_CREATED",
+              "problemId":"prob-no-score",
+              "testCases":[{"caseId":1,"input":[1,2],"output":3}]
+            }
+        """.trimIndent()
+
+        service.sync(raw)
+
+        assertEquals(0, savedSlot.captured.testCases[0].score)
     }
 }

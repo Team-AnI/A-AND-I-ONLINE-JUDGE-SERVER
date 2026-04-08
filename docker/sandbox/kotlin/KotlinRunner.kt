@@ -120,13 +120,17 @@ fun buildSolutionSource(code: String, argsLiteral: String, resultFilePath: Strin
         "    }\n" +
         "    append('\"')\n" +
         "}\n\n" +
-        "fun __judgeToJsonLiteral(value: Any?): String = when (value) {\n" +
-        "    null -> \"null\"\n" +
-        "    is String -> __judgeQuoteJson(value)\n" +
-        "    is Number, is Boolean -> value.toString()\n" +
-        "    is Array<*> -> value.joinToString(prefix = \"[\", postfix = \"]\") { __judgeToJsonLiteral(it) }\n" +
-        "    is Iterable<*> -> value.joinToString(prefix = \"[\", postfix = \"]\") { __judgeToJsonLiteral(it) }\n" +
-        "    is Map<*, *> -> value.entries.joinToString(prefix = \"{\", postfix = \"}\") { entry -> __judgeQuoteJson(entry.key.toString()) + \":\" + __judgeToJsonLiteral(entry.value) }\n" +
+        "fun __judgeToJsonLiteral(value: Any?): String = when {\n" +
+        "    value == null -> \"null\"\n" +
+        "    value is String -> __judgeQuoteJson(value)\n" +
+        "    value is Number || value is Boolean -> value.toString()\n" +
+        "    value is Array<*> -> value.joinToString(prefix = \"[\", postfix = \"]\") { __judgeToJsonLiteral(it) }\n" +
+        "    value is Iterable<*> -> value.joinToString(prefix = \"[\", postfix = \"]\") { __judgeToJsonLiteral(it) }\n" +
+        "    value is Map<*, *> -> value.entries.joinToString(prefix = \"{\", postfix = \"}\") { entry -> __judgeQuoteJson(entry.key.toString()) + \":\" + __judgeToJsonLiteral(entry.value) }\n" +
+        "    value.javaClass.isArray -> {\n" +
+        "        val length = java.lang.reflect.Array.getLength(value)\n" +
+        "        (0 until length).joinToString(prefix = \"[\", postfix = \"]\") { i -> __judgeToJsonLiteral(java.lang.reflect.Array.get(value, i)) }\n" +
+        "    }\n" +
         "    else -> __judgeQuoteJson(value.toString())\n" +
         "}\n\n" +
         code + "\n\n" +

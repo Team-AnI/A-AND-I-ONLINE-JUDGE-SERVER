@@ -1,6 +1,7 @@
 package com.aandiclub.online.judge.service
 
 import com.aandiclub.online.judge.domain.Problem
+import com.aandiclub.online.judge.domain.ProblemMetadata
 import com.aandiclub.online.judge.domain.TestCase
 import com.aandiclub.online.judge.repository.ProblemRepository
 import kotlinx.coroutines.reactor.awaitSingle
@@ -8,6 +9,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import java.time.Instant
 import kotlin.text.Regex
 
 enum class ProblemEventSyncOutcome {
@@ -56,18 +58,23 @@ class ProblemEventSyncService(
             val caseId = findFirst(testCaseNode, "caseId", "case_id")?.asInt(idx + 1) ?: (idx + 1)
             val argsNode = findFirst(testCaseNode, "args", "input", "inputs")
             val args = nodeToArgs(argsNode)
+            val score = findFirst(testCaseNode, "score")?.asInt(0) ?: 0
 
             TestCase(
                 caseId = caseId,
                 args = args,
                 expectedOutput = expectedOutput,
+                score = score,
             )
         }
+
+        val metadata = extractMetadata(payload)
 
         problemRepository.save(
             Problem(
                 problemId = problemId,
                 testCases = testCases,
+                metadata = metadata,
             )
         ).awaitSingle()
 
@@ -97,6 +104,20 @@ class ProblemEventSyncService(
             messageNode.isObject -> messageNode
             else -> null
         }
+    }
+
+    private fun extractMetadata(payload: JsonNode): ProblemMetadata? {
+        val metaNode = findFirst(payload, "metadata") ?: return null
+        if (!metaNode.isObject) return null
+
+        val courseId = findFirst(metaNode, "courseId", "course_id")?.asText()?.takeIf { it.isNotBlank() }
+        val startAt = findFirst(metaNode, "startAt", "start_at")?.asText()
+            ?.let { runCatching { Instant.parse(it) }.getOrNull() }
+        val endAt = findFirst(metaNode, "endAt", "end_at")?.asText()
+            ?.let { runCatching { Instant.parse(it) }.getOrNull() }
+
+        if (courseId == null && startAt == null && endAt == null) return null
+        return ProblemMetadata(courseId = courseId, startAt = startAt, endAt = endAt)
     }
 
     private fun extractProblemId(node: JsonNode): String? =

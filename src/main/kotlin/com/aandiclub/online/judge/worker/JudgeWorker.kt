@@ -127,19 +127,39 @@ class JudgeWorker(
         return if (outputsMatch(output, expectedOutput)) TestCaseStatus.PASSED else TestCaseStatus.WRONG_ANSWER
     }
 
-    private fun outputsMatch(actual: Any?, expected: Any?): Boolean = when {
-        actual == null || expected == null -> actual == expected
-        actual is Number && expected is Number -> actual.toBigDecimal().compareTo(expected.toBigDecimal()) == 0
-        actual is List<*> && expected is List<*> ->
-            actual.size == expected.size && actual.zip(expected).all { (a, e) -> outputsMatch(a, e) }
-        actual is Map<*, *> && expected is Map<*, *> -> {
-            val actualKeys = actual.keys.map { it.toString() }.toSet()
-            val expectedKeys = expected.keys.map { it.toString() }.toSet()
-            actualKeys == expectedKeys && actual.entries.all { (key, value) ->
-                outputsMatch(value, expected.entries.first { it.key.toString() == key.toString() }.value)
+    private fun outputsMatch(actual: Any?, expected: Any?): Boolean {
+        if (actual == null || expected == null) return actual == expected
+
+        val normalizedExpected = if (expected is String) {
+            try {
+                when (actual) {
+                    is List<*> -> objectMapper.readValue(expected, List::class.java)
+                    is Map<*, *> -> objectMapper.readValue(expected, Map::class.java)
+                    is Number -> try { BigDecimal(expected) } catch (_: Exception) { expected }
+                    else -> expected
+                }
+            } catch (_: Exception) {
+                expected
             }
+        } else {
+            expected
         }
-        else -> actual == expected
+
+        return when {
+            actual is Number && normalizedExpected is Number ->
+                actual.toBigDecimal().compareTo(normalizedExpected.toBigDecimal()) == 0
+            actual is List<*> && normalizedExpected is List<*> ->
+                actual.size == normalizedExpected.size && actual.zip(normalizedExpected).all { (a, e) -> outputsMatch(a, e) }
+            actual is Map<*, *> && normalizedExpected is Map<*, *> -> {
+                val actualKeys = actual.keys.map { it.toString() }.toSet()
+                val expectedKeys = normalizedExpected.keys.map { it.toString() }.toSet()
+                actualKeys == expectedKeys && actual.entries.all { (key, value) ->
+                    val expectedValue = normalizedExpected.entries.firstOrNull { it.key.toString() == key.toString() }?.value
+                    outputsMatch(value, expectedValue)
+                }
+            }
+            else -> actual == normalizedExpected
+        }
     }
 
     private fun Number.toBigDecimal(): BigDecimal = BigDecimal(this.toString())

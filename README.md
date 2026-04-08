@@ -135,6 +135,24 @@ MongoDB/Redis 헬스 정보는 환경 연결 상태에 따라 포함됩니다.
 - OpenAPI JSON: `http://localhost:8080/v3/api-docs`
 - Swagger UI: `http://localhost:8080/swagger-ui.html`
 
+## Sandbox Runner Tests
+
+각 언어 러너(Python/Dart/Kotlin)의 단위 테스트는 Docker 없이 실행 가능합니다.
+러너 로직(args 변환, 반환값 직렬화)을 수정할 때 반드시 참고하세요.
+
+```bash
+# Kotlin
+./gradlew -p docker/sandbox/kotlin test
+
+# Dart
+cd docker/sandbox/dart && dart test
+
+# Python
+cd docker/sandbox/python && python3 -m unittest test_runner -v
+```
+
+테스트 케이스 전체 목록 및 검증 범위: [`docker/sandbox/RUNNER_TESTS.md`](docker/sandbox/RUNNER_TESTS.md)
+
 ## Sandbox Security (gVisor Optional)
 
 기본 실행은 Docker 기본 runtime이며, 운영 환경에서 추가 격리가 필요하면 `runsc`(gVisor) 적용을 권장합니다.

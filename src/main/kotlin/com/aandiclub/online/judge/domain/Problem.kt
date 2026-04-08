@@ -9,5 +9,6 @@ data class Problem(
     @Id
     val problemId: String,
     val testCases: List<TestCase>,
+    val metadata: ProblemMetadata? = null,
     val updatedAt: Instant = Instant.now(),
 )

@@ -109,6 +109,45 @@ class SandboxRunnerIntegrationTest {
     }
 
     @Test
+    fun `kotlin executes solution with list arg`() {
+        val result = runBlockingRunner(
+            language = Language.KOTLIN,
+            code = "fun solution(nums: List<Int>): Int = nums.sum()",
+            args = listOf(listOf(1, 2, 3)),
+        )
+
+        assertEquals(TestCaseStatus.PASSED, result.status)
+        assertEquals(6, result.output)
+        assertEquals(null, result.error)
+    }
+
+    @Test
+    fun `kotlin executes solution with nested list arg`() {
+        val result = runBlockingRunner(
+            language = Language.KOTLIN,
+            code = "fun solution(matrix: List<List<Int>>): Int = matrix.flatten().sum()",
+            args = listOf(listOf(listOf(1, 2), listOf(3, 4))),
+        )
+
+        assertEquals(TestCaseStatus.PASSED, result.status)
+        assertEquals(10, result.output)
+        assertEquals(null, result.error)
+    }
+
+    @Test
+    fun `kotlin executes solution with list and scalar args`() {
+        val result = runBlockingRunner(
+            language = Language.KOTLIN,
+            code = "fun solution(nums: List<Int>, target: Int): Boolean = nums.contains(target)",
+            args = listOf(listOf(1, 2, 3), 2),
+        )
+
+        assertEquals(TestCaseStatus.PASSED, result.status)
+        assertEquals(true, result.output)
+        assertEquals(null, result.error)
+    }
+
+    @Test
     fun `dart compile error is reported`() {
         val result = runBlockingRunner(
             language = Language.DART,
