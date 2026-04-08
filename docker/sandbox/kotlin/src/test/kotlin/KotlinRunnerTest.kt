@@ -1,7 +1,10 @@
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
+import java.io.File
+import java.nio.file.Files
 
 // ── 반환값 직렬화 헬퍼 (buildSolutionSource에 삽입되는 __judgeToJsonLiteral 로직과 동일) ──
 fun judgeToJsonLiteral(value: Any?): String {
@@ -28,7 +31,14 @@ fun judgeToJsonLiteral(value: Any?): String {
         is Map<*, *>      -> value.entries.joinToString(prefix = "{", postfix = "}") { entry ->
             quoteJson(entry.key.toString()) + ":" + judgeToJsonLiteral(entry.value)
         }
-        else              -> quoteJson(value.toString())
+        else -> if (value.javaClass.isArray) {
+            val length = java.lang.reflect.Array.getLength(value)
+            (0 until length).joinToString(prefix = "[", postfix = "]") { i ->
+                judgeToJsonLiteral(java.lang.reflect.Array.get(value, i))
+            }
+        } else {
+            quoteJson(value.toString())
+        }
     }
 }
 
@@ -170,5 +180,85 @@ class KotlinRunnerTest {
 
     @Test fun `judgeToJsonLiteral serializes map with list value`() {
         assertEquals("{\"nums\":[1, 2]}", judgeToJsonLiteral(mapOf("nums" to listOf(1, 2))))
+    }
+
+    // ── 생성된 소스 실행: primitive 배열 직렬화 end-to-end ────────────────
+
+    private fun runGeneratedSolution(code: String, argsLiteral: String): JSONObject {
+        assumeTrue(
+            runCatching { ProcessBuilder("kotlinc", "-version").start().waitFor() == 0 }.getOrDefault(false),
+            "kotlinc not available"
+        )
+        val tmpDir = Files.createTempDirectory("kotlin-runner-test").toFile()
+        try {
+            val resultFile = File(tmpDir, "result.txt")
+            val source = buildSolutionSource(code, argsLiteral, resultFile.absolutePath)
+            val sourceFile = File(tmpDir, "solution.kt")
+            sourceFile.writeText(source)
+            val jarFile = File(tmpDir, "solution.jar")
+
+            val compile = ProcessBuilder("kotlinc", sourceFile.absolutePath, "-include-runtime", "-d", jarFile.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+            compile.waitFor()
+
+            ProcessBuilder("java", "-jar", jarFile.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+                .waitFor()
+
+            return JSONObject(resultFile.readText())
+        } finally {
+            tmpDir.deleteRecursively()
+        }
+    }
+
+    @Test fun `generated code serializes IntArray without memory address`() {
+        val result = runGeneratedSolution(
+            code = "fun solution(n: Int): IntArray = intArrayOf(1, 2, 3)",
+            argsLiteral = "0",
+        )
+        assertEquals("OK", result.getString("status"))
+        assertEquals("[1,2,3]", result.get("output").toString().replace(" ", ""))
+    }
+
+    @Test fun `generated code serializes LongArray without memory address`() {
+        val result = runGeneratedSolution(
+            code = "fun solution(n: Int): LongArray = longArrayOf(10L, 20L, 30L)",
+            argsLiteral = "0",
+        )
+        assertEquals("OK", result.getString("status"))
+        assertEquals("[10,20,30]", result.get("output").toString().replace(" ", ""))
+    }
+
+    @Test fun `generated code serializes IntArray not as memory address`() {
+        val result = runGeneratedSolution(
+            code = "fun solution(n: Int): IntArray = intArrayOf(1, 2, 3)",
+            argsLiteral = "0",
+        )
+        val output = result.get("output").toString()
+        assert(!output.contains("@")) { "메모리 주소 형태로 출력됨: $output" }
+    }
+
+    // ── judgeToJsonLiteral: primitive 배열 직렬화 ─────────────────────────
+
+    @Test fun `judgeToJsonLiteral serializes IntArray`() {
+        assertEquals("[1, 2, 3]", judgeToJsonLiteral(intArrayOf(1, 2, 3)))
+    }
+
+    @Test fun `judgeToJsonLiteral serializes LongArray`() {
+        assertEquals("[1, 2, 3]", judgeToJsonLiteral(longArrayOf(1L, 2L, 3L)))
+    }
+
+    @Test fun `judgeToJsonLiteral serializes DoubleArray`() {
+        assertEquals("[1.0, 2.5]", judgeToJsonLiteral(doubleArrayOf(1.0, 2.5)))
+    }
+
+    @Test fun `judgeToJsonLiteral serializes BooleanArray`() {
+        assertEquals("[true, false]", judgeToJsonLiteral(booleanArrayOf(true, false)))
+    }
+
+    @Test fun `judgeToJsonLiteral serializes empty IntArray`() {
+        assertEquals("[]", judgeToJsonLiteral(intArrayOf()))
     }
 }

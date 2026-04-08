@@ -1,3 +1,6 @@
+import json
+import os
+import subprocess
 import sys
 import unittest
 
@@ -196,6 +199,43 @@ class TestExecuteSolution(unittest.TestCase):
         result = execute_solution(ns, [])
         self.assertIsNone(result["error"])
         self.assertEqual({"a": 1}, result["output"])
+
+
+class TestRunnerEndToEnd(unittest.TestCase):
+    """runner.py 전체 파이프라인 end-to-end 검증 (Docker 없이)"""
+
+    RUNNER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "runner.py")
+
+    def _run(self, code: str, args: list) -> dict:
+        payload = json.dumps({"code": code, "args": args})
+        proc = subprocess.run(
+            ["python3", self.RUNNER_PATH],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return json.loads(proc.stdout)
+
+    def test_returns_list(self):
+        result = self._run("def solution(n): return [1, 2, 3]", [0])
+        self.assertIsNone(result["error"])
+        self.assertEqual([1, 2, 3], result["output"])
+
+    def test_returns_tuple_normalized_to_list(self):
+        result = self._run("def solution(n): return (1, 2, 3)", [0])
+        self.assertIsNone(result["error"])
+        self.assertEqual([1, 2, 3], result["output"])
+
+    def test_returns_nested_list(self):
+        result = self._run("def solution(): return [[1, 2], [3, 4]]", [])
+        self.assertIsNone(result["error"])
+        self.assertEqual([[1, 2], [3, 4]], result["output"])
+
+    def test_returns_dict(self):
+        result = self._run("def solution(): return {'a': 1, 'b': 2}", [])
+        self.assertIsNone(result["error"])
+        self.assertEqual({"a": 1, "b": 2}, result["output"])
 
 
 if __name__ == "__main__":

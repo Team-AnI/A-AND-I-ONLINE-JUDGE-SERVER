@@ -148,6 +148,58 @@ class SandboxRunnerIntegrationTest {
     }
 
     @Test
+    fun `kotlin returns IntArray as json array`() {
+        val result = runBlockingRunner(
+            language = Language.KOTLIN,
+            code = "fun solution(n: Int): IntArray = intArrayOf(1, 2, 3)",
+            args = listOf(0),
+        )
+
+        assertEquals(TestCaseStatus.PASSED, result.status)
+        assertEquals(listOf(1, 2, 3), result.output)
+        assertEquals(null, result.error)
+    }
+
+    @Test
+    fun `kotlin returns LongArray as json array`() {
+        val result = runBlockingRunner(
+            language = Language.KOTLIN,
+            code = "fun solution(n: Int): LongArray = longArrayOf(10L, 20L, 30L)",
+            args = listOf(0),
+        )
+
+        assertEquals(TestCaseStatus.PASSED, result.status)
+        assertEquals(listOf(10, 20, 30), result.output)
+        assertEquals(null, result.error)
+    }
+
+    @Test
+    fun `dart returns list as json array`() {
+        val result = runBlockingRunner(
+            language = Language.DART,
+            code = "List<int> solution(int n) => [1, 2, 3];",
+            args = listOf(0),
+        )
+
+        assertEquals(TestCaseStatus.PASSED, result.status)
+        assertEquals(listOf(1, 2, 3), result.output)
+        assertEquals(null, result.error)
+    }
+
+    @Test
+    fun `python returns list as json array`() {
+        val result = runBlockingRunner(
+            language = Language.PYTHON,
+            code = "def solution(n): return [1, 2, 3]",
+            args = listOf(0),
+        )
+
+        assertEquals(TestCaseStatus.PASSED, result.status)
+        assertEquals(listOf(1, 2, 3), result.output)
+        assertEquals(null, result.error)
+    }
+
+    @Test
     fun `dart compile error is reported`() {
         val result = runBlockingRunner(
             language = Language.DART,

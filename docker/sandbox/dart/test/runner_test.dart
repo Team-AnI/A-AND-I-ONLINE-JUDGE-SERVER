@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:test/test.dart';
 import '../runner.dart';
 
@@ -135,6 +137,43 @@ void main() {
 
     test('serializes map with list value', () {
       expect(judgeNormalizeOutput({'nums': [1, 2]}), equals({'nums': [1, 2]}));
+    });
+  });
+
+  // ── runner end-to-end: 생성된 코드 실행 검증 (Docker 없이) ──────────────
+  group('runner end-to-end', () {
+    final runnerPath = '${Directory.current.path}/runner.dart';
+
+    Future<Map<String, dynamic>> runRunner(String code, List<dynamic> args) async {
+      final process = await Process.start('dart', ['run', runnerPath]);
+      process.stdin.write(jsonEncode({'code': code, 'args': args}));
+      await process.stdin.close();
+      final output = await process.stdout.transform(utf8.decoder).join();
+      return jsonDecode(output) as Map<String, dynamic>;
+    }
+
+    test('returns list as json array', () async {
+      final result = await runRunner('List<int> solution(int n) => [1, 2, 3];', [0]);
+      expect(result['error'], isNull);
+      expect(result['output'], equals([1, 2, 3]));
+    });
+
+    test('returns nested list as json array', () async {
+      final result = await runRunner('List<List<int>> solution() => [[1, 2], [3, 4]];', []);
+      expect(result['error'], isNull);
+      expect(result['output'], equals([[1, 2], [3, 4]]));
+    });
+
+    test('returns map as json object', () async {
+      final result = await runRunner("Map<String, int> solution() => {'a': 1, 'b': 2};", []);
+      expect(result['error'], isNull);
+      expect(result['output'], equals({'a': 1, 'b': 2}));
+    });
+
+    test('returns int as scalar', () async {
+      final result = await runRunner('int solution(int a, int b) => a + b;', [3, 5]);
+      expect(result['error'], isNull);
+      expect(result['output'], equals(8));
     });
   });
 }
