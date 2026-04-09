@@ -123,6 +123,101 @@ cp .env.example .env
 - 해당 `problemId`가 아직 없으면 `problems` 컬렉션에 새 문서를 생성합니다.
 - 컨슈머 동작 조건: `JUDGE_PROBLEM_EVENTS_ENABLED=true` 그리고 `REPORTS_TESTCASES_EVENTS_QUEUE_URL` 설정.
 
+## Submission Event Payload (SNS)
+
+채점이 종료되면, 서버는 최종 결과를 기준으로 SNS 토픽에 `JUDGE_COMPLETED` 이벤트를 발행할 수 있습니다.
+
+### 이벤트 발행 시점
+
+다음 두 경우에 발행을 시도합니다:
+- 모든 테스트 케이스 채점이 끝나고 최종 `SubmissionStatus`가 결정된 직후
+- 해당 문제에 테스트 케이스가 하나도 없어 `RUNTIME_ERROR`로 종료된 직후
+
+즉, 이 이벤트는 **중간 진행 상황 스트리밍용이 아니라 채점 완료 알림용**입니다.  
+개별 테스트 케이스 결과 실시간 전송은 Redis Pub/Sub 기반 SSE 스트림(`/v1/submissions/{submissionId}/stream`)으로 처리하고, SNS는 최종 요약만 발행합니다.
+
+### 활성화 조건
+
+- `JUDGE_SUBMISSION_EVENTS_PUBLISH_ENABLED=true`
+- `JUDGE_SUBMISSION_EVENTS_TOPIC_ARN` 설정 필수
+
+기본값은 비활성화이며, `topicArn`이 비어 있으면 발행을 건너뜁니다.
+
+### 발행 방식
+
+- AWS SDK의 `SnsClient.publish(...)`로 지정된 Topic ARN에 전송
+- Message body는 JSON 문자열 1건
+- 현재 MessageAttributes 없이 본문(payload)만 발행
+
+### 발행되는 이벤트 포맷
+
+```json
+{
+  "eventType": "JUDGE_COMPLETED",
+  "publicCode": "A00123",
+  "problemId": "quiz-101",
+  "score": 80,
+  "passedCases": 8,
+  "totalCases": 10,
+  "timestamp": "2026-04-09T02:15:30.123Z"
+}
+```
+
+필드 설명:
+- `eventType`: 현재 고정값 `JUDGE_COMPLETED`
+- `publicCode`: 제출자의 공개 코드
+- `problemId`: 채점한 문제 ID
+- `score`: 0~100 정수 점수
+- `passedCases`: 통과한 테스트 케이스 수
+- `totalCases`: 전체 테스트 케이스 수
+- `timestamp`: 이벤트 발행 시각 (`Instant.now()` UTC ISO-8601)
+
+### 점수 계산 규칙
+
+- 각 테스트 케이스의 `score` 합이 0이 아니면, **통과한 테스트 케이스 점수 합 / 전체 점수 합 \* 100**
+- 모든 테스트 케이스의 `score`가 0이면, **통과한 케이스 수 / 전체 케이스 수 \* 100**
+- 테스트 케이스가 0개이면 `score=0`
+
+### 예시
+
+#### 1) 직접 구독한 SNS 메시지 본문 예시
+
+```json
+{
+  "eventType": "JUDGE_COMPLETED",
+  "publicCode": "A00123",
+  "problemId": "quiz-101",
+  "score": 100,
+  "passedCases": 10,
+  "totalCases": 10,
+  "timestamp": "2026-04-09T02:15:30.123Z"
+}
+```
+
+#### 2) SNS -> SQS Fan-out Envelope 예시
+
+```json
+{
+  "Type": "Notification",
+  "MessageId": "52f8a9dd-19e1-4c13-a5b5-77d59c35d001",
+  "TopicArn": "arn:aws:sns:ap-northeast-2:123456789012:judge-submission-events",
+  "Message": "{\"eventType\":\"JUDGE_COMPLETED\",\"publicCode\":\"A00123\",\"problemId\":\"quiz-101\",\"score\":100,\"passedCases\":10,\"totalCases\":10,\"timestamp\":\"2026-04-09T02:15:30.123Z\"}"
+}
+```
+
+### 활용 예시
+
+- 제출 결과 알림 전송
+- 랭킹/리더보드 집계 트리거
+- 학습 분석 파이프라인 적재
+- 외부 캐시/통계 시스템 동기화
+
+### 참고
+
+- SNS 발행 실패는 로그로만 남기며, 현재 채점 완료 자체를 롤백하지는 않습니다.
+- 채점 세부 결과(`testCaseResults`) 전체는 이 SNS 이벤트에 포함되지 않습니다.
+- 상세 결과는 DB 조회 API 또는 SSE 스트림으로 확인해야 합니다.
+
 ## Health Check
 
 ```bash
