@@ -7,6 +7,7 @@ import com.aandiclub.online.judge.api.dto.SubmissionRequest
 import com.aandiclub.online.judge.api.dto.SubmissionResult
 import com.aandiclub.online.judge.domain.Submission
 import com.aandiclub.online.judge.domain.SubmissionStatus
+import com.aandiclub.online.judge.domain.TestCaseResult
 import com.aandiclub.online.judge.logging.SubmissionMdc
 import com.aandiclub.online.judge.repository.SubmissionRepository
 import com.aandiclub.online.judge.worker.JudgeWorker
@@ -137,10 +138,15 @@ class SubmissionService(
                     payload.contains("\"event\":\"error\"") -> "error"
                     else -> "test_case_result"
                 }
+                val data = if (event == "test_case_result") {
+                    maskHiddenCasePayload(payload)
+                } else {
+                    payload
+                }
                 emit(
                     ServerSentEvent.builder<String>()
                         .event(event)
-                        .data(payload)
+                        .data(data)
                         .build()
                 )
                 event != "done" && event != "error"
@@ -159,7 +165,7 @@ class SubmissionService(
         return SubmissionResult(
             submissionId = submission.id,
             status = submission.status,
-            testCases = submission.testCaseResults,
+            testCases = maskHiddenCaseResults(submission.testCaseResults),
         )
     }
 
@@ -176,7 +182,7 @@ class SubmissionService(
                     problemId = submission.problemId,
                     language = submission.language,
                     status = submission.status,
-                    testCases = submission.testCaseResults,
+                    testCases = maskHiddenCaseResults(submission.testCaseResults),
                     createdAt = submission.createdAt.toKstOffsetDateTime(),
                     completedAt = submission.completedAt?.toKstOffsetDateTime(),
                 )
@@ -195,7 +201,7 @@ class SubmissionService(
                     language = submission.language,
                     code = submission.code,
                     status = submission.status,
-                    testCases = submission.testCaseResults,
+                    testCases = maskHiddenCaseResults(submission.testCaseResults),
                     createdAt = submission.createdAt.toKstOffsetDateTime(),
                     completedAt = submission.completedAt?.toKstOffsetDateTime(),
                 )
@@ -203,10 +209,6 @@ class SubmissionService(
 
     private fun Instant.toKstOffsetDateTime(): OffsetDateTime =
         atZone(KST_ZONE_ID).toOffsetDateTime()
-
-    companion object {
-        private val KST_ZONE_ID: ZoneId = ZoneId.of("Asia/Seoul")
-    }
 
     private suspend fun requireAuthorizedSubmission(
         submissionId: String,
@@ -219,5 +221,23 @@ class SubmissionService(
             throw ResponseStatusException(HttpStatus.FORBIDDEN, "Submission does not belong to the requester")
         }
         return submission
+    }
+
+    private fun maskHiddenCasePayload(payload: String): String {
+        val node = runCatching { objectMapper.readTree(payload) }.getOrNull()
+            ?: return payload
+        if (!node.isObject) return payload
+
+        val maskedNode = node.deepCopy<tools.jackson.databind.node.ObjectNode>()
+        maskedNode.put("output", HIDDEN_CASE_OUTPUT_MASK)
+        return objectMapper.writeValueAsString(maskedNode)
+    }
+
+    private fun maskHiddenCaseResults(results: List<TestCaseResult>): List<TestCaseResult> =
+        results.map { it.copy(output = HIDDEN_CASE_OUTPUT_MASK) }
+
+    companion object {
+        private val KST_ZONE_ID: ZoneId = ZoneId.of("Asia/Seoul")
+        private const val HIDDEN_CASE_OUTPUT_MASK = "비공개"
     }
 }

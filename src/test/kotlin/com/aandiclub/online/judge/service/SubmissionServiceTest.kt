@@ -6,6 +6,8 @@ import com.aandiclub.online.judge.api.dto.SubmissionRequest
 import com.aandiclub.online.judge.domain.Language
 import com.aandiclub.online.judge.domain.Submission
 import com.aandiclub.online.judge.domain.SubmissionStatus
+import com.aandiclub.online.judge.domain.TestCaseResult
+import com.aandiclub.online.judge.domain.TestCaseStatus
 import com.aandiclub.online.judge.repository.SubmissionRepository
 import com.aandiclub.online.judge.worker.JudgeWorker
 import io.mockk.coVerify
@@ -124,6 +126,32 @@ class SubmissionServiceTest {
         assertNotNull(result)
         assertEquals("existing-uuid", result!!.submissionId)
         assertEquals(SubmissionStatus.ACCEPTED, result.status)
+    }
+
+    @Test
+    fun `getResult masks output for all problems`() = runTest {
+        val submission = Submission(
+            id = "existing-masked",
+            submitterId = "user-1",
+            submitterPublicCode = "A00123",
+            problemId = "problem-any",
+            language = Language.DART,
+            code = "int solution(int a, int b) => a + b;",
+            status = SubmissionStatus.ACCEPTED,
+            testCaseResults = listOf(
+                TestCaseResult(
+                    caseId = 1,
+                    status = TestCaseStatus.PASSED,
+                    output = 8,
+                )
+            ),
+        )
+        every { submissionRepository.findById("existing-masked") } returns Mono.just(submission)
+
+        val result = service.getResult("existing-masked", "user-1", isAdmin = false)
+
+        assertEquals("비공개", result!!.testCases.first().output)
+        assertEquals(TestCaseStatus.PASSED, result.testCases.first().status)
     }
 
     @Test
@@ -254,6 +282,36 @@ class SubmissionServiceTest {
     }
 
     @Test
+    fun `getProblemSubmissions masks output for all problems`() = runTest {
+        every {
+            submissionRepository.findAllBySubmitterIdAndProblemIdOrderByCreatedAtDesc("user-1", "problem-any")
+        } returns Flux.just(
+            Submission(
+                id = "sub-1",
+                submitterId = "user-1",
+                submitterPublicCode = "A00123",
+                problemId = "problem-any",
+                language = Language.PYTHON,
+                code = "print(1)",
+                status = SubmissionStatus.ACCEPTED,
+                testCaseResults = listOf(
+                    TestCaseResult(
+                        caseId = 1,
+                        status = TestCaseStatus.PASSED,
+                        output = "real-output",
+                    )
+                ),
+            )
+        )
+
+        val result = service.getProblemSubmissions("problem-any", "user-1")
+
+        assertEquals(1, result.size)
+        assertEquals("비공개", result.first().testCases.first().output)
+        assertEquals(TestCaseStatus.PASSED, result.first().testCases.first().status)
+    }
+
+    @Test
     fun `getAllSubmissions returns admin records with submitter metadata`() = runTest {
         val newer = Submission(
             id = "sub-new",
@@ -263,6 +321,13 @@ class SubmissionServiceTest {
             language = Language.KOTLIN,
             code = "fun solution(a: Int, b: Int): Int = a + b",
             status = SubmissionStatus.ACCEPTED,
+            testCaseResults = listOf(
+                TestCaseResult(
+                    caseId = 1,
+                    status = TestCaseStatus.PASSED,
+                    output = 3,
+                )
+            ),
             createdAt = Instant.parse("2026-03-15T10:00:00Z"),
             completedAt = Instant.parse("2026-03-15T10:00:01Z"),
         )
@@ -280,7 +345,13 @@ class SubmissionServiceTest {
                     language = Language.KOTLIN,
                     code = "fun solution(a: Int, b: Int): Int = a + b",
                     status = SubmissionStatus.ACCEPTED,
-                    testCases = emptyList(),
+                    testCases = listOf(
+                        TestCaseResult(
+                            caseId = 1,
+                            status = TestCaseStatus.PASSED,
+                            output = "비공개",
+                        )
+                    ),
                     createdAt = OffsetDateTime.parse("2026-03-15T19:00:00+09:00"),
                     completedAt = OffsetDateTime.parse("2026-03-15T19:00:01+09:00"),
                 ),
@@ -310,7 +381,40 @@ class SubmissionServiceTest {
 
         assertEquals(1, events.size)
         assertEquals("test_case_result", events[0].event())
-        assertEquals(payload, events[0].data())
+        val masked = objectMapper.readTree(events[0].data())
+        assertEquals("1", masked.path("caseId").asText())
+        assertEquals("PASSED", masked.path("status").asText())
+        assertEquals("비공개", masked.path("output").asText())
+    }
+
+    @Test
+    fun `streamResults masks output for all problems`() = runTest {
+        val submissionId = "sub-any"
+        val submission = Submission(
+            id = submissionId,
+            submitterId = "user-1",
+            submitterPublicCode = "A00123",
+            problemId = "problem-any",
+            language = Language.PYTHON,
+            code = "print(1)",
+        )
+        val payload = """{"caseId":3,"status":"TIME_LIMIT_EXCEEDED","timeMs":2001.0,"memoryMb":24.7,"output":"x","error":"timeout"}"""
+        val redisMessage = mockk<ReactiveSubscription.Message<String, String>>()
+        every { submissionRepository.findById(submissionId) } returns Mono.just(submission)
+        every { redisMessage.message } returns payload
+        every { listenerContainer.receive(ChannelTopic.of("submission:$submissionId")) } returns Flux.just(redisMessage)
+
+        val events = service.streamResults(submissionId, "user-1", isAdmin = false).toList()
+
+        assertEquals(1, events.size)
+        assertEquals("test_case_result", events[0].event())
+        val masked = objectMapper.readTree(events[0].data())
+        assertEquals("3", masked.path("caseId").asText())
+        assertEquals("TIME_LIMIT_EXCEEDED", masked.path("status").asText())
+        assertEquals("2001.0", masked.path("timeMs").asText())
+        assertEquals("24.7", masked.path("memoryMb").asText())
+        assertEquals("비공개", masked.path("output").asText())
+        assertEquals("timeout", masked.path("error").asText())
     }
 
     @Test

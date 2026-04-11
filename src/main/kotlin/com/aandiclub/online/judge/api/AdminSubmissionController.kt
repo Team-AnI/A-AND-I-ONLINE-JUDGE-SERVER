@@ -43,7 +43,7 @@ class AdminSubmissionController(
                         examples = [
                             ExampleObject(
                                 name = "admin-list",
-                                value = """[{"submissionId":"sub-1","submitterId":"95d7a3b1-2c22-4a32-b343-1d4efdfde001","submitterPublicCode":"A00123","problemId":"quiz-101","language":"PYTHON","code":"def solution(a, b):\n    return a + b","status":"ACCEPTED","testCases":[{"caseId":1,"status":"PASSED","timeMs":1.2,"memoryMb":2.4,"output":8,"error":null}],"createdAt":"2026-03-15T19:00:00+09:00","completedAt":"2026-03-15T19:00:02+09:00"}]""",
+                                value = """[{"submissionId":"sub-1","submitterId":"95d7a3b1-2c22-4a32-b343-1d4efdfde001","submitterPublicCode":"A00123","problemId":"quiz-101","language":"PYTHON","code":"def solution(a, b):\n    return a + b","status":"ACCEPTED","testCases":[{"caseId":1,"status":"PASSED","timeMs":1.2,"memoryMb":2.4,"output":"비공개","error":null}],"createdAt":"2026-03-15T19:00:00+09:00","completedAt":"2026-03-15T19:00:02+09:00"}]""",
                             ),
                         ],
                     ),
