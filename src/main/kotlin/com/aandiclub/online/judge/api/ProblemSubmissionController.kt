@@ -46,7 +46,7 @@ class ProblemSubmissionController(
                         examples = [
                             ExampleObject(
                                 name = "my-history",
-                                value = """[{"submissionId":"sub-1","problemId":"quiz-101","language":"KOTLIN","status":"ACCEPTED","testCases":[{"caseId":1,"status":"PASSED","timeMs":1.2,"memoryMb":8.0,"output":8,"error":null}],"createdAt":"2026-03-15T19:00:00+09:00","completedAt":"2026-03-15T19:00:02+09:00"}]""",
+                                value = """[{"submissionId":"sub-1","problemId":"quiz-101","language":"KOTLIN","status":"ACCEPTED","testCases":[{"caseId":1,"status":"PASSED","timeMs":1.2,"memoryMb":8.0,"output":"비공개","error":null}],"createdAt":"2026-03-15T19:00:00+09:00","completedAt":"2026-03-15T19:00:02+09:00"}]""",
                             ),
                         ],
                     ),

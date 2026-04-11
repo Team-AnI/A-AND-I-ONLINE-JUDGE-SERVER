@@ -130,7 +130,7 @@ class SubmissionController(
                         examples = [
                             ExampleObject(
                                 name = "stream-events",
-                                value = "event: test_case_result\ndata: {\"caseId\":1,\"status\":\"PASSED\",\"timeMs\":1.37,\"memoryMb\":12.4}\n\nevent: done\ndata: {\"event\":\"done\",\"submissionId\":\"2af20dd4-04a5-4a6c-b3fa-6d9a9e5f9972\",\"overallStatus\":\"ACCEPTED\"}",
+                                value = "event: test_case_result\ndata: {\"caseId\":1,\"status\":\"PASSED\",\"timeMs\":1.37,\"memoryMb\":12.4,\"output\":\"비공개\",\"error\":null}\n\nevent: done\ndata: {\"event\":\"done\",\"submissionId\":\"2af20dd4-04a5-4a6c-b3fa-6d9a9e5f9972\",\"overallStatus\":\"ACCEPTED\"}",
                             ),
                         ],
                     ),
@@ -172,7 +172,7 @@ class SubmissionController(
                         examples = [
                             ExampleObject(
                                 name = "accepted-result",
-                                value = """{"submissionId":"2af20dd4-04a5-4a6c-b3fa-6d9a9e5f9972","status":"ACCEPTED","testCases":[{"caseId":1,"status":"PASSED","timeMs":1.37,"memoryMb":12.4,"output":8,"error":null}]}""",
+                                value = """{"submissionId":"2af20dd4-04a5-4a6c-b3fa-6d9a9e5f9972","status":"ACCEPTED","testCases":[{"caseId":1,"status":"PASSED","timeMs":1.37,"memoryMb":12.4,"output":"비공개","error":null}]}""",
                             ),
                         ],
                     ),
