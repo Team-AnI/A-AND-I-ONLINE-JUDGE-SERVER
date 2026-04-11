@@ -3,8 +3,14 @@ package com.aandiclub.online.judge.config
 import io.swagger.v3.oas.annotations.enums.SecuritySchemeType
 import io.swagger.v3.oas.annotations.security.SecurityScheme
 import io.swagger.v3.oas.models.OpenAPI
+import io.swagger.v3.oas.models.Operation
+import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.info.Info
+import io.swagger.v3.oas.models.media.StringSchema
+import io.swagger.v3.oas.models.parameters.Parameter
 import io.swagger.v3.oas.models.servers.Server
+import io.swagger.v3.oas.models.security.SecurityRequirement
+import io.swagger.v3.oas.models.security.SecurityScheme as OpenApiSecurityScheme
 import io.swagger.v3.oas.models.tags.Tag
 import org.springdoc.core.customizers.OpenApiCustomizer
 import org.springdoc.core.models.GroupedOpenApi
@@ -92,10 +98,11 @@ class SwaggerConfig(
                     A&I v2 compatible online judge API.
 
                     Basic flow:
-                    1. Send required headers: `deviceOS`, `Authenticate`, `timestamp`.
-                    2. Open `POST /v2/submissions` to create a submission.
-                    3. Subscribe to `/v2/submissions/{submissionId}/stream` for wrapped SSE events.
-                    4. Poll `GET /v2/submissions/{submissionId}` for the final envelope response.
+                    1. Use Swagger `Authorize` to set the `Authenticate` header.
+                    2. Send required headers: `deviceOS`, `timestamp`.
+                    3. Open `POST /v2/submissions` to create a submission.
+                    4. Subscribe to `/v2/submissions/{submissionId}/stream` for wrapped SSE events.
+                    5. Poll `GET /v2/submissions/{submissionId}` for the final envelope response.
 
                     Notes:
                     - All responses are wrapped with `success`, `data`, `error`, and `timestamp`.
@@ -108,6 +115,8 @@ class SwaggerConfig(
                     "Admin Test Cases V2" to "A&I v2 compatible administrative test case APIs.",
                 )
             ))
+            .addOpenApiCustomizer(v2HeaderCustomizer())
+            .addOpenApiCustomizer(v2SecurityCustomizer())
             .build()
 
     @Bean
@@ -120,6 +129,56 @@ class SwaggerConfig(
                 .url(publicServerUrl)
                 .description("Public API"),
         )
+    }
+
+    internal fun v2HeaderCustomizer(): OpenApiCustomizer = OpenApiCustomizer { openApi ->
+        openApi.paths.orEmpty()
+            .filterKeys { it.startsWith("/v2/") }
+            .values
+            .flatMap { it.readOperations() }
+            .forEach { operation ->
+                operation.ensureHeaderParameter(
+                    name = "deviceOS",
+                    description = "Client device OS identifier.",
+                    required = true,
+                    example = "ANDROID",
+                )
+                operation.ensureHeaderParameter(
+                    name = "timestamp",
+                    description = "Client request timestamp.",
+                    required = true,
+                    example = "1712600000",
+                )
+                operation.ensureHeaderParameter(
+                    name = "salt",
+                    description = "Optional request salt.",
+                    required = false,
+                    example = "optional-random-value",
+                )
+            }
+    }
+
+    internal fun v2SecurityCustomizer(): OpenApiCustomizer = OpenApiCustomizer { openApi ->
+        val securitySchemes = (openApi.components ?: Components()).securitySchemes ?: linkedMapOf()
+        securitySchemes[V2_AUTHENTICATE_SCHEME] = OpenApiSecurityScheme()
+            .type(OpenApiSecurityScheme.Type.APIKEY)
+            .`in`(OpenApiSecurityScheme.In.HEADER)
+            .name("Authenticate")
+            .description("Bearer JWT token for v2 requests. Format: `Bearer <token>`.")
+        openApi.components = (openApi.components ?: Components()).securitySchemes(securitySchemes)
+
+        openApi.paths.orEmpty()
+            .filterKeys { it.startsWith("/v2/") }
+            .values
+            .flatMap { it.readOperations() }
+            .forEach { operation ->
+                val hasRequirement = operation.security.orEmpty().any { requirement ->
+                    requirement.containsKey(V2_AUTHENTICATE_SCHEME)
+                }
+                if (!hasRequirement) {
+                    operation.addSecurityItem(SecurityRequirement().addList(V2_AUTHENTICATE_SCHEME))
+                }
+            }
     }
 
     private fun versionedCustomizer(
@@ -137,5 +196,31 @@ class SwaggerConfig(
                 .name(name)
                 .description(tagDescription)
         }
+    }
+
+    private fun Operation.ensureHeaderParameter(
+        name: String,
+        description: String,
+        required: Boolean,
+        example: String,
+    ) {
+        val alreadyExists = parameters.orEmpty().any { parameter ->
+            parameter.`in` == "header" && parameter.name.equals(name, ignoreCase = true)
+        }
+        if (alreadyExists) return
+
+        addParametersItem(
+            Parameter()
+                .`in`("header")
+                .name(name)
+                .description(description)
+                .required(required)
+                .schema(StringSchema())
+                .example(example)
+        )
+    }
+
+    companion object {
+        internal const val V2_AUTHENTICATE_SCHEME = "v2Authenticate"
     }
 }

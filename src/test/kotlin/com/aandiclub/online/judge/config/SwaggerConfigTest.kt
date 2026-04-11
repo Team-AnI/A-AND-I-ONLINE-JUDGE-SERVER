@@ -8,7 +8,11 @@ import com.aandiclub.online.judge.api.v2.V2ProblemSubmissionController
 import com.aandiclub.online.judge.api.v2.V2SubmissionController
 import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.security.SecurityScheme
+import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI
+import io.swagger.v3.oas.models.Operation
+import io.swagger.v3.oas.models.PathItem
+import io.swagger.v3.oas.models.security.SecurityScheme as OpenApiSecurityScheme
 import io.swagger.v3.oas.models.servers.Server
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -107,5 +111,38 @@ class SwaggerConfigTest {
         assertNotNull(V2SubmissionController::class.java)
         assertNotNull(V2ProblemSubmissionController::class.java)
         assertNotNull(V2AdminSubmissionController::class.java)
+    }
+
+    @Test
+    fun `v2 openapi adds required header parameters to operations`() {
+        val config = SwaggerConfig(OpenApiProperties(serverUrl = ""))
+        val operation = Operation()
+        val openApi = OpenAPI().path("/v2/submissions", PathItem().post(operation))
+
+        config.v2HeaderCustomizer().customise(openApi)
+
+        val headers = operation.parameters.associateBy { it.name }
+        assertEquals(setOf("deviceOS", "timestamp", "salt"), headers.keys)
+        assertTrue(headers.getValue("deviceOS").required)
+        assertTrue(headers.getValue("timestamp").required)
+        assertEquals(false, headers.getValue("salt").required)
+    }
+
+    @Test
+    fun `v2 openapi adds authenticate security scheme and requirement`() {
+        val config = SwaggerConfig(OpenApiProperties(serverUrl = ""))
+        val operation = Operation()
+        val openApi = OpenAPI()
+            .components(Components())
+            .path("/v2/submissions", PathItem().post(operation))
+
+        config.v2SecurityCustomizer().customise(openApi)
+
+        val scheme = openApi.components.securitySchemes[SwaggerConfig.V2_AUTHENTICATE_SCHEME]
+        assertNotNull(scheme)
+        assertEquals(OpenApiSecurityScheme.Type.APIKEY, scheme?.type)
+        assertEquals(OpenApiSecurityScheme.In.HEADER, scheme?.`in`)
+        assertEquals("Authenticate", scheme?.name)
+        assertTrue(operation.security.any { it.containsKey(SwaggerConfig.V2_AUTHENTICATE_SCHEME) })
     }
 }

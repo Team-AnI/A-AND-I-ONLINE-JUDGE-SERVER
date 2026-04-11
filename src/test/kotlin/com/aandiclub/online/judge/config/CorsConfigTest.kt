@@ -11,4 +11,14 @@ class CorsConfigTest {
 
         assertTrue(properties.apiAllowedOriginPatterns.contains("https://api.aandiclub.com"))
     }
+
+    @Test
+    fun `default cors headers include v2 custom headers`() {
+        val properties = CorsProperties()
+
+        assertTrue(properties.allowedHeaders.contains("Authenticate"))
+        assertTrue(properties.allowedHeaders.contains("deviceOS"))
+        assertTrue(properties.allowedHeaders.contains("timestamp"))
+        assertTrue(properties.allowedHeaders.contains("salt"))
+    }
 }
