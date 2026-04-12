@@ -1,16 +1,16 @@
-name: CD
+name: CD Full
 
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "full-v*.*.*"
 
 jobs:
   deploy:
-    name: Deploy
+    name: Deploy Full (App + Sandbox)
     runs-on: ubuntu-latest
     environment: production
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/full-v')
     permissions:
       id-token: write
       contents: read
@@ -52,11 +52,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate SemVer Tag
+      - name: Validate Full Deploy Tag
         run: |
-          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^full-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid tag format: ${GITHUB_REF_NAME}"
-            echo "Expected format: vX.Y.Z"
+            echo "Expected format: full-vX.Y.Z"
             exit 1
           fi
 
@@ -66,6 +66,9 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: gradle
+
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@v1
 
       - name: Validate Required Secrets
         run: |
@@ -90,8 +93,23 @@ jobs:
             fi
           done
 
-      - name: Run Tests
+      - name: Run App Tests
         run: ./gradlew --no-daemon test
+
+      - name: Test Python Sandbox
+        run: |
+          set -euo pipefail
+          cd docker/sandbox/python
+          python3 -m unittest test_runner -v
+
+      - name: Test Kotlin Sandbox
+        run: ./gradlew --no-daemon -p docker/sandbox/kotlin test
+
+      - name: Test Dart Sandbox
+        run: |
+          set -euo pipefail
+          cd docker/sandbox/dart
+          dart test
 
       - name: Build Boot JAR
         run: ./gradlew --no-daemon clean bootJar
@@ -134,6 +152,24 @@ jobs:
             --push \
             -t "${IMAGE_URI}" \
             .
+
+      - name: Build and Push Sandbox Images (linux/arm64)
+        run: |
+          set -euo pipefail
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          for lang in python kotlin dart; do
+            echo "Building sandbox image for ${lang}..."
+            SANDBOX_IMAGE="${ECR_REGISTRY}/judge-sandbox-${lang}:latest"
+            SANDBOX_VERSIONED_IMAGE="${ECR_REGISTRY}/judge-sandbox-${lang}:${GITHUB_REF_NAME}"
+
+            docker buildx build \
+              --platform linux/arm64 \
+              --push \
+              -t "${SANDBOX_IMAGE}" \
+              -t "${SANDBOX_VERSIONED_IMAGE}" \
+              "docker/sandbox/${lang}/"
+          done
 
       - name: Encode Runtime Values
         run: |

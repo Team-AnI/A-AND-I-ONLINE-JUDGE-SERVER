@@ -317,19 +317,33 @@ curl -s \
 - `push` / `pull_request`:
   - `.github/workflows/ci.yml`
   - 테스트만 수행 (`./gradlew test`)
-- `push tag`:
+- `push tag (app-only deploy)`:
   - `.github/workflows/cd.yml`
   - 태그가 `vX.Y.Z` 형식일 때만 배포 진행 (`v1.2.3` 등)
-  - OIDC로 AWS Role Assume -> ECR 이미지 Push -> EC2에서 ECR Pull 후 컨테이너 재기동
+  - 앱 이미지만 빌드/배포하고, 서버는 최신 sandbox 이미지를 사용
+- `push tag (full deploy)`:
+  - `.github/workflows/cd-full.yml`
+  - 태그가 `full-vX.Y.Z` 형식일 때만 전체 배포 진행 (`full-v1.2.3` 등)
+  - 앱 + sandbox 전체 테스트 후 앱 이미지와 sandbox 이미지까지 빌드/배포
 
 ### 배포 흐름 (Tag 기준)
 
+#### 앱만 배포 (`vX.Y.Z`)
+
 1. `vX.Y.Z` 태그 push
-2. GitHub Actions가 테스트 실행
+2. GitHub Actions가 앱 테스트 실행
 3. app JAR 빌드 후 Docker 이미지(`linux/arm64`)를 ECR에 push
 4. EC2에 SSH 접속
-5. EC2가 자신의 IAM Role로 ECR 로그인 후 이미지 pull
+5. EC2가 자신의 IAM Role로 ECR 로그인 후 앱 이미지 및 최신 sandbox 이미지를 pull
 6. EC2에서 `docker-compose.yml` 동적 생성 후 `docker compose up -d` 배포
+
+#### 샌드박스 포함 전체 배포 (`full-vX.Y.Z`)
+
+1. `full-vX.Y.Z` 태그 push
+2. GitHub Actions가 앱 테스트 + sandbox(`python`/`kotlin`/`dart`) 테스트 실행
+3. app JAR 빌드 후 Docker 이미지(`linux/arm64`)를 ECR에 push
+4. sandbox 이미지 3종을 ECR에 `latest` 및 `full-vX.Y.Z` 태그로 push
+5. EC2에서 최신 앱 이미지와 최신 sandbox 이미지를 pull 후 재기동
 
 ### 1) AWS OIDC Role 생성 (GitHub Actions용)
 
@@ -353,7 +367,10 @@ Role Trust Policy 예시:
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
         },
         "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:<OWNER>/<REPO>:ref:refs/tags/v*"
+          "token.actions.githubusercontent.com:sub": [
+            "repo:<OWNER>/<REPO>:ref:refs/tags/v*",
+            "repo:<OWNER>/<REPO>:ref:refs/tags/full-v*"
+          ]
         }
       }
     }
@@ -385,8 +402,13 @@ Role Permission Policy 예시 (ECR Push):
 
 ### 2) ECR 리포지토리 생성
 
-- 예: `online-judge-app`
-- 태그는 Git 태그(`vX.Y.Z`)로 push됨
+- 앱 리포지토리 예: `online-judge-app`
+- sandbox 리포지토리 예:
+  - `judge-sandbox-python`
+  - `judge-sandbox-kotlin`
+  - `judge-sandbox-dart`
+- 앱 이미지는 Git 태그(`vX.Y.Z`)로 push됨
+- full deploy 시 sandbox 이미지는 `latest` 및 `full-vX.Y.Z` 태그로 push됨
 
 ### 3) EC2 인스턴스 IAM Role 설정
 
@@ -478,11 +500,21 @@ Swagger UI의 "Try it out" 요청을 현재 접속한 호스트로 보내려면 
 
 ### 6) 배포 실행
 
+#### 앱만 배포
+
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
+#### 샌드박스 포함 전체 배포
+
+```bash
+git tag full-v1.0.0
+git push origin full-v1.0.0
+```
+
 주의:
-- 태그는 반드시 `vX.Y.Z` 형식이어야 배포가 실행됩니다.
+- 앱-only 배포 태그는 반드시 `vX.Y.Z` 형식이어야 합니다.
+- 샌드박스 포함 전체 배포 태그는 반드시 `full-vX.Y.Z` 형식이어야 합니다.
 - EC2 스펙이 `t4g.medium`이므로 앱 이미지는 `linux/arm64`로 빌드/배포됩니다.
