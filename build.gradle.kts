@@ -37,6 +37,8 @@ dependencies {
 	implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactive")
 	implementation("org.jetbrains.kotlinx:kotlinx-coroutines-slf4j")
 	implementation("tools.jackson.module:jackson-module-kotlin")
+	implementation("ca.pjer:logback-awslogs-appender:1.6.0")
+	implementation("com.amazonaws:aws-java-sdk-logs:1.12.+")
 	annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
 	testImplementation("org.springframework.boot:spring-boot-starter-data-redis-reactive-test")
 	testImplementation("org.springframework.boot:spring-boot-starter-data-mongodb-test")
