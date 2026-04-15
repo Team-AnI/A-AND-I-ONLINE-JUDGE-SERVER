@@ -7,6 +7,12 @@
         </encoder>
     </appender>
 
+    <appender name="API_JSON_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%msg%n</pattern>
+        </encoder>
+    </appender>
+
     <appender name="CLOUDWATCH" class="ca.pjer.logback.AwsLogsAppender">
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
             <level>INFO</level>
@@ -22,13 +28,37 @@
         <maxBlockTimeMillis>5000</maxBlockTimeMillis>
     </appender>
 
+    <appender name="API_JSON_CLOUDWATCH" class="ca.pjer.logback.AwsLogsAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
+        <layout>
+            <pattern>%msg%n</pattern>
+        </layout>
+        <logGroupName>/a-and-i/online-judge</logGroupName>
+        <logStreamUuidPrefix>online-judge-api-</logStreamUuidPrefix>
+        <logRegion>ap-northeast-2</logRegion>
+        <maxBatchLogEvents>50</maxBatchLogEvents>
+        <maxFlushTimeMillis>30000</maxFlushTimeMillis>
+        <maxBlockTimeMillis>5000</maxBlockTimeMillis>
+    </appender>
+
     <springProfile name="local">
+        <logger name="API_JSON_LOGGER" level="INFO" additivity="false">
+            <appender-ref ref="API_JSON_CONSOLE"/>
+        </logger>
+
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
         </root>
     </springProfile>
 
     <springProfile name="prod">
+        <logger name="API_JSON_LOGGER" level="INFO" additivity="false">
+            <appender-ref ref="API_JSON_CONSOLE"/>
+            <appender-ref ref="API_JSON_CLOUDWATCH"/>
+        </logger>
+
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
             <appender-ref ref="CLOUDWATCH"/>

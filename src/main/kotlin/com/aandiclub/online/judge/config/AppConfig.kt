@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.sync.Semaphore
+import java.time.Clock
 
 @ConfigurationProperties(prefix = "judge.sandbox")
 data class SandboxProperties(
@@ -41,6 +42,7 @@ data class WorkerProperties(
     WorkerProperties::class,
     SubmissionProperties::class,
     SubmissionEventProperties::class,
+    ApiLoggingProperties::class,
 )
 class AppConfig {
 
@@ -60,4 +62,7 @@ class AppConfig {
     @Bean
     fun judgeWorkerSemaphore(workerProperties: WorkerProperties): Semaphore =
         Semaphore(workerProperties.maxConcurrency.coerceAtLeast(1))
+
+    @Bean
+    fun systemClock(): Clock = Clock.systemUTC()
 }

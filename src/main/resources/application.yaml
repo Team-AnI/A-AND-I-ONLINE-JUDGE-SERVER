@@ -76,6 +76,12 @@ judge:
     queue-url: ${JUDGE_USER_EVENTS_QUEUE_URL:}
     wait-time-seconds: ${JUDGE_USER_EVENTS_WAIT_TIME_SECONDS:20}
     max-messages: ${JUDGE_USER_EVENTS_MAX_MESSAGES:10}
+  api-logging:
+    env: ${APP_ENV:${SPRING_PROFILES_ACTIVE:local}}
+    service-name: ${SERVICE_NAME:judge}
+    version: ${APP_VERSION:0.0.1-SNAPSHOT}
+    domain-code: ${SERVICE_DOMAIN_CODE:5}
+    instance-id: ${INSTANCE_ID:${HOSTNAME:unknown-instance}}
   sandbox:
     time-limit-seconds: ${SANDBOX_TIME_LIMIT_SECONDS:2}
     memory-limit-mb: ${SANDBOX_MEMORY_LIMIT_MB:256}

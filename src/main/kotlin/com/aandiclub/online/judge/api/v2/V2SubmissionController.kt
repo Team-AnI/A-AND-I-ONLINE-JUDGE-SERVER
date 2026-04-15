@@ -10,8 +10,6 @@ import com.aandiclub.online.judge.api.v2.dto.toV2
 import com.aandiclub.online.judge.api.v2.support.V2ApiResponse
 import com.aandiclub.online.judge.api.v2.support.V2ApiResponses
 import com.aandiclub.online.judge.api.v2.support.V2ErrorCode
-import com.aandiclub.online.judge.api.v2.support.v2RequestContext
-import com.aandiclub.online.judge.logging.SubmissionMdc
 import com.aandiclub.online.judge.service.SubmissionService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -24,7 +22,6 @@ import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.http.codec.ServerSentEvent
@@ -45,7 +42,6 @@ class V2SubmissionController(
     private val submissionService: SubmissionService,
     private val objectMapper: ObjectMapper,
 ) {
-    private val log = LoggerFactory.getLogger(V2SubmissionController::class.java)
 
     @PostMapping
     @Operation(
@@ -106,19 +102,8 @@ class V2SubmissionController(
         exchange: ServerWebExchange,
     ): ResponseEntity<V2ApiResponse<V2SubmissionAcceptedData>> {
         val access = exchange.requestAccess()
-        val context = exchange.v2RequestContext()
         val accepted = submissionService.createSubmission(request.toV1(), access.submitterId)
         val data = accepted.toV2(streamUrl = "/v2/submissions/${accepted.submissionId}/stream")
-        SubmissionMdc.withSubmissionId(accepted.submissionId) {
-            log.info(
-                "V2 submission request accepted: submitterId={}, problemId={}, language={}, deviceOS={}, clientTimestamp={}",
-                access.submitterId,
-                request.problemId,
-                request.language,
-                context.deviceOS,
-                context.timestamp,
-            )
-        }
         return ResponseEntity.accepted().body(V2ApiResponses.success(data))
     }
 

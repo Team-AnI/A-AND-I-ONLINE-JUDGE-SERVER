@@ -3,7 +3,6 @@ package com.aandiclub.online.judge.api
 import com.aandiclub.online.judge.api.dto.SubmissionAccepted
 import com.aandiclub.online.judge.api.dto.SubmissionRequest
 import com.aandiclub.online.judge.api.dto.SubmissionResult
-import com.aandiclub.online.judge.logging.SubmissionMdc
 import com.aandiclub.online.judge.service.SubmissionService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -16,7 +15,6 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.validation.Valid
 import kotlinx.coroutines.flow.Flow
-import org.slf4j.LoggerFactory
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.http.codec.ServerSentEvent
@@ -38,7 +36,6 @@ import org.springframework.web.server.ServerWebExchange
 class SubmissionController(
     private val submissionService: SubmissionService,
 ) {
-    private val log = LoggerFactory.getLogger(SubmissionController::class.java)
 
     @PostMapping
     @Operation(
@@ -101,15 +98,6 @@ class SubmissionController(
     ): ResponseEntity<SubmissionAccepted> {
         val access = exchange.requestAccess()
         val accepted = submissionService.createSubmission(request, access.submitterId)
-        SubmissionMdc.withSubmissionId(accepted.submissionId) {
-            log.info(
-                "Submission request accepted: submitterId={}, problemId={}, language={}, streamUrl={}",
-                access.submitterId,
-                request.problemId,
-                request.language,
-                accepted.streamUrl
-            )
-        }
         return ResponseEntity.accepted().body(accepted)
     }
 
@@ -148,9 +136,6 @@ class SubmissionController(
         exchange: ServerWebExchange,
     ): Flow<ServerSentEvent<String>> {
         val access = exchange.requestAccess()
-        SubmissionMdc.withSubmissionId(submissionId) {
-            log.info("Submission stream subscribed")
-        }
         return submissionService.streamResults(submissionId, access.submitterId, access.isAdmin)
     }
 
@@ -191,18 +176,8 @@ class SubmissionController(
         exchange: ServerWebExchange,
     ): ResponseEntity<SubmissionResult> {
         val access = exchange.requestAccess()
-        SubmissionMdc.withSubmissionId(submissionId) {
-            log.debug("Submission result requested")
-        }
         val result = submissionService.getResult(submissionId, access.submitterId, access.isAdmin)
-            ?: return ResponseEntity.notFound().build<SubmissionResult>().also {
-                SubmissionMdc.withSubmissionId(submissionId) {
-                    log.debug("Submission result not ready")
-                }
-            }
-        SubmissionMdc.withSubmissionId(submissionId) {
-            log.info("Submission result responded: status={}", result.status)
-        }
+            ?: return ResponseEntity.notFound().build<SubmissionResult>()
         return ResponseEntity.ok(result)
     }
 }

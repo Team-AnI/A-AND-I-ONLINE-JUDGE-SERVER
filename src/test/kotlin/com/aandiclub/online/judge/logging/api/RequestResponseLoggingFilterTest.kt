@@ -1,0 +1,152 @@
+package com.aandiclub.online.judge.logging.api
+
+import com.aandiclub.online.judge.api.v2.support.V2ApiResponses
+import com.aandiclub.online.judge.api.v2.support.V2ErrorCode
+import com.aandiclub.online.judge.config.ApiLoggingProperties
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.springframework.core.io.buffer.DataBufferUtils
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.mock.http.server.reactive.MockServerHttpRequest
+import org.springframework.mock.web.server.MockServerWebExchange
+import org.springframework.web.server.ServerWebExchange
+import org.springframework.web.server.WebFilterChain
+import reactor.core.publisher.Mono
+import tools.jackson.databind.ObjectMapper
+
+class RequestResponseLoggingFilterTest {
+    private val objectMapper = ObjectMapper()
+    private val maskingUtil = MaskingUtil()
+    private val apiLogFactory = ApiLogFactory(
+        objectMapper = objectMapper,
+        maskingUtil = maskingUtil,
+        properties = ApiLoggingProperties(
+            env = "test",
+            serviceName = "judge",
+            version = "1.2.3",
+            domainCode = 5,
+            instanceId = "judge-test-1",
+        ),
+    )
+    private val writer = RecordingApiLogWriter()
+    private val filter = RequestResponseLoggingFilter(apiLogFactory, writer)
+
+    @Test
+    fun `writes info api log for successful response with masked request`() {
+        val exchange = exchange(
+            path = "/v2/auth/login?mode=normal",
+            body =
+                """
+                {
+                  "loginId": "hans1234",
+                  "password": "secret",
+                  "accessToken": "aaa",
+                  "refreshToken": "bbb"
+                }
+                """.trimIndent(),
+            headers = mapOf(
+                "deviceOS" to "ANDROID",
+                "Authenticate" to "Bearer jwt-token",
+                "timestamp" to "1712600000",
+                "salt" to "salt-value",
+            ),
+        )
+
+        filter.filter(exchange, SuccessChain(objectMapper)).block()
+
+        val entry = writer.entries.single()
+        assertEquals("INFO", entry.level)
+        assertEquals("API", entry.logType)
+        assertEquals("HTTP request completed", entry.message)
+        assertEquals("Bearer ****", entry.headers.Authenticate)
+        assertEquals("ANDROID", entry.headers.deviceOS)
+        assertEquals("han******", (entry.request.body as Map<*, *>)["loginId"])
+        assertEquals("****", (entry.request.body as Map<*, *>)["password"])
+        assertEquals("****", (entry.request.body as Map<*, *>)["accessToken"])
+        assertEquals(true, entry.response.success)
+        assertEquals("judge", entry.tags[0])
+        assertEquals("auth", entry.tags[1])
+        assertEquals("success", entry.tags[2])
+        assertEquals("create", entry.tags[3])
+    }
+
+    @Test
+    fun `writes warn api error log for failure response`() {
+        writer.entries.clear()
+        val exchange = exchange(
+            path = "/v2/auth/login",
+            body = """{"loginId":"hans1234","password":"wrong"}""",
+            headers = mapOf("Authenticate" to "Bearer jwt-token"),
+        )
+
+        filter.filter(exchange, FailureChain(objectMapper)).block()
+
+        val entry = writer.entries.single()
+        assertEquals("WARN", entry.level)
+        assertEquals("API_ERROR", entry.logType)
+        assertTrue(entry.message.contains("invalid credentials"))
+        assertFalse(entry.response.success)
+        assertEquals(V2ErrorCode.JUDGE_AUTH_INVALID_TOKEN.code, entry.response.error?.code)
+        assertEquals("fail", entry.tags[2])
+    }
+
+    private fun exchange(path: String, body: String, headers: Map<String, String>): MockServerWebExchange {
+        val builder = MockServerHttpRequest.post(path)
+            .contentType(MediaType.APPLICATION_JSON)
+        headers.forEach(builder::header)
+        return MockServerWebExchange.from(builder.body(body))
+    }
+
+    private class RecordingApiLogWriter : ApiLogWriter {
+        val entries: MutableList<ApiLogEntry> = mutableListOf()
+
+        override fun write(entry: ApiLogEntry) {
+            entries += entry
+        }
+    }
+
+    private class SuccessChain(
+        private val objectMapper: ObjectMapper,
+    ) : WebFilterChain {
+        override fun filter(exchange: ServerWebExchange): Mono<Void> =
+            DataBufferUtils.join(exchange.request.body)
+                .flatMap { dataBuffer ->
+                    DataBufferUtils.release(dataBuffer)
+                    val body = objectMapper.writeValueAsBytes(
+                        V2ApiResponses.success(
+                            mapOf(
+                                "loginId" to "hans1234",
+                                "accessToken" to "server-access-token",
+                            )
+                        )
+                    )
+                    exchange.response.statusCode = HttpStatus.OK
+                    exchange.response.headers.contentType = MediaType.APPLICATION_JSON
+                    exchange.response.writeWith(Mono.just(exchange.response.bufferFactory().wrap(body)))
+                }
+    }
+
+    private class FailureChain(
+        private val objectMapper: ObjectMapper,
+    ) : WebFilterChain {
+        override fun filter(exchange: ServerWebExchange): Mono<Void> =
+            DataBufferUtils.join(exchange.request.body)
+                .flatMap { dataBuffer ->
+                    DataBufferUtils.release(dataBuffer)
+                    val body = objectMapper.writeValueAsBytes(
+                        V2ApiResponses.error(
+                            errorCode = V2ErrorCode.JUDGE_AUTH_INVALID_TOKEN,
+                            message = "Login failed: invalid credentials",
+                            value = "loginId",
+                            alert = "로그인 정보를 확인해주세요.",
+                        )
+                    )
+                    exchange.response.statusCode = HttpStatus.UNAUTHORIZED
+                    exchange.response.headers.contentType = MediaType.APPLICATION_JSON
+                    exchange.response.writeWith(Mono.just(exchange.response.bufferFactory().wrap(body)))
+                }
+    }
+}
