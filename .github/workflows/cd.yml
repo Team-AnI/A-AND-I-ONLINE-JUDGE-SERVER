@@ -467,4 +467,43 @@ jobs:
           done
 
           docker compose -f "${AWS_APP_DIR}/docker-compose.yml" up -d --force-recreate mongodb redis app
+
+          cleanup_repo_except_ref() {
+            local repo="$1"
+            local keep_ref="$2"
+            local keep_id
+            keep_id="$(docker image inspect --format '{{.Id}}' "${keep_ref}" 2>/dev/null || true)"
+
+            if [[ -z "${keep_id}" ]]; then
+              echo "Skipping cleanup for ${repo}: keep ref not found (${keep_ref})"
+              return 0
+            fi
+
+            while IFS= read -r ref; do
+              [[ -z "${ref}" ]] && continue
+              [[ "${ref}" == "${keep_ref}" ]] && continue
+
+              ref_id="$(docker image inspect --format '{{.Id}}' "${ref}" 2>/dev/null || true)"
+              if [[ -n "${ref_id}" && "${ref_id}" == "${keep_id}" ]]; then
+                continue
+              fi
+
+              echo "Removing old image ref: ${ref}"
+              docker rmi -f "${ref}" || true
+            done < <(docker images --format '{{.Repository}}:{{.Tag}}' "${repo}" | awk '$0 != "<none>:<none>"' | sort -u)
+          }
+
+          APP_IMAGE_REPO="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${AWS_ECR_REPOSITORY}"
+          cleanup_repo_except_ref "${APP_IMAGE_REPO}" "${IMAGE_URI}"
+
+          for lang in python kotlin dart; do
+            ecr_repo="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/judge-sandbox-${lang}"
+            ecr_ref="${ecr_repo}:latest"
+            local_ref="judge-sandbox-${lang}:latest"
+
+            cleanup_repo_except_ref "${ecr_repo}" "${ecr_ref}"
+            cleanup_repo_except_ref "judge-sandbox-${lang}" "${local_ref}"
+          done
+
+          docker image prune -f
           EOF

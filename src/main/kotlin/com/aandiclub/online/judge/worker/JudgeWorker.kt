@@ -69,6 +69,7 @@ class JudgeWorker(
             )
             redisTemplate.convertAndSend(channel, donePayload).awaitSingle()
             submissionEventPublisher?.publishJudgeCompleted(
+                submissionId = submission.id,
                 publicCode = submission.submitterPublicCode,
                 problemId = submission.problemId,
                 testCases = resolvedTestCases,
@@ -122,6 +123,7 @@ class JudgeWorker(
         )
         redisTemplate.convertAndSend(channel, donePayload).awaitSingle()
         submissionEventPublisher?.publishJudgeCompleted(
+            submissionId = submission.id,
             publicCode = submission.submitterPublicCode,
             problemId = submission.problemId,
             testCases = resolvedTestCases,

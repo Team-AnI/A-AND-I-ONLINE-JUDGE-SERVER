@@ -101,6 +101,7 @@ class JudgeWorkerTest {
         }
         coVerify(exactly = 1) {
             submissionEventPublisher.publishJudgeCompleted(
+                submissionId = "sub-1",
                 publicCode = "A00123",
                 problemId = "quiz-101",
                 testCases = testCases,

@@ -25,6 +25,7 @@ class SubmissionEventPublisher(
     private val log = LoggerFactory.getLogger(SubmissionEventPublisher::class.java)
 
     suspend fun publishJudgeCompleted(
+        submissionId: String,
         publicCode: String,
         problemId: String,
         testCases: List<TestCase>,
@@ -53,10 +54,17 @@ class SubmissionEventPublisher(
 
         withContext(Dispatchers.IO) {
             try {
-                val request = PublishRequest.builder()
+                val requestBuilder = PublishRequest.builder()
                     .topicArn(properties.topicArn)
                     .message(message)
-                    .build()
+
+                if (properties.topicArn.isFifoTopicArn()) {
+                    requestBuilder
+                        .messageGroupId(problemId.toSnsFifoToken("judge-completed"))
+                        .messageDeduplicationId(submissionId.toSnsFifoToken("judge-completed-$problemId"))
+                }
+
+                val request = requestBuilder.build()
                 val response = snsClient.publish(request)
                 log.info(
                     "Judge completed event published: publicCode={}, problemId={}, score={}, messageId={}",
@@ -81,4 +89,12 @@ class SubmissionEventPublisher(
             passedScore * 100 / totalScore
         }
     }
+
+    private fun String.toSnsFifoToken(fallback: String): String =
+        trim()
+            .takeIf { it.isNotEmpty() }
+            ?.take(128)
+            ?: fallback.take(128)
+
+    private fun String.isFifoTopicArn(): Boolean = trim().endsWith(".fifo")
 }
