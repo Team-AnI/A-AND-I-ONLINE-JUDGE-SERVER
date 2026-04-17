@@ -40,7 +40,7 @@ springdoc:
 
 judge:
   cors:
-    api-allowed-origin-patterns: "${JUDGE_CORS_API_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*,https://aandiclub.com,https://api.aandiclub.com,https://admin.aandiclub.com,https://online.judge.aandiclub.com}"
+    api-allowed-origin-patterns: "${JUDGE_CORS_API_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*,https://aandiclub.com,https://api.aandiclub.com,https://admin.aandiclub.com,https://online.judge.aandiclub.com,https://qa.aandiclub.com}"
     api-allowed-methods: "${JUDGE_CORS_API_ALLOWED_METHODS:GET,POST,PUT,PATCH,DELETE,OPTIONS}"
     allowed-headers: "${JUDGE_CORS_ALLOWED_HEADERS:*}"
     exposed-headers: "${JUDGE_CORS_EXPOSED_HEADERS:Location}"
