@@ -61,6 +61,7 @@ class SwaggerConfig(
         GroupedOpenApi.builder()
             .group("v1")
             .pathsToMatch("/v1/**")
+            .addOpenApiCustomizer(publicServerUrlOpenApiCustomizer())
             .addOpenApiCustomizer(versionedCustomizer(
                 version = "v1",
                 description = """
@@ -92,6 +93,7 @@ class SwaggerConfig(
         GroupedOpenApi.builder()
             .group("v2")
             .pathsToMatch("/v2/**")
+            .addOpenApiCustomizer(publicServerUrlOpenApiCustomizer())
             .addOpenApiCustomizer(versionedCustomizer(
                 version = "v2",
                 description = """

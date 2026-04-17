@@ -44,6 +44,19 @@ class SwaggerConfigTest {
     }
 
     @Test
+    fun `grouped openapi docs include public server url customizer`() {
+        val config = SwaggerConfig(OpenApiProperties(serverUrl = "https://public.example.test"))
+        val v1OpenApi = OpenAPI().servers(listOf(Server().url("http://10.0.0.12:8080")))
+        val v2OpenApi = OpenAPI().servers(listOf(Server().url("http://10.0.0.12:8080")))
+
+        config.v1GroupedOpenApi().openApiCustomizers.forEach { it.customise(v1OpenApi) }
+        config.v2GroupedOpenApi().openApiCustomizers.forEach { it.customise(v2OpenApi) }
+
+        assertEquals(listOf("https://public.example.test"), v1OpenApi.servers.map { it.url })
+        assertEquals(listOf("https://public.example.test"), v2OpenApi.servers.map { it.url })
+    }
+
+    @Test
     fun `public server url overrides generated servers`() {
         val openApi = OpenAPI().servers(listOf(Server().url("http://10.0.0.12:8080")))
         val configuredPublicUrl = "https://public.example.test"

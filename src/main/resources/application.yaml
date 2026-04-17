@@ -46,8 +46,6 @@ judge:
     exposed-headers: "${JUDGE_CORS_EXPOSED_HEADERS:Location}"
     allow-credentials: ${JUDGE_CORS_ALLOW_CREDENTIALS:false}
     max-age-seconds: ${JUDGE_CORS_MAX_AGE_SECONDS:3600}
-  openapi:
-    server-url: ${APP_OPENAPI_SERVER_URL:}
   jwt-auth:
     enabled: ${JUDGE_JWT_AUTH_ENABLED:true}
     signing-key: ${JUDGE_JWT_AUTH_SIGNING_KEY:}
@@ -59,6 +57,8 @@ judge:
     window-seconds: ${JUDGE_RATE_LIMIT_WINDOW_SECONDS:60}
   worker:
     max-concurrency: ${JUDGE_WORKER_MAX_CONCURRENCY:2}
+  openapi:
+    server-url: ${APP_OPENAPI_SERVER_URL:}
   submission:
     dedup-ttl-minutes: ${JUDGE_SUBMISSION_DEDUP_TTL_MINUTES:5}
   problem-events:
