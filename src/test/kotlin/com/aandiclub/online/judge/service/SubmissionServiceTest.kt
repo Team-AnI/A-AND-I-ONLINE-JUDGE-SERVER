@@ -15,12 +15,14 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -64,6 +66,11 @@ class SubmissionServiceTest {
         objectMapper,
         submissionProperties,
     )
+
+    @AfterEach
+    fun tearDown() {
+        judgeWorkerScope.cancel()
+    }
 
     @Test
     fun `createSubmission saves submitter identity and returns SubmissionAccepted`() = runTest {
