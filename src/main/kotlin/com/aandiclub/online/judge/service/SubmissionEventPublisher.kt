@@ -16,7 +16,7 @@ import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 
 @Service
-@ConditionalOnProperty(prefix = "judge.submission-events", name = ["publishEnabled"], havingValue = "true")
+@ConditionalOnProperty(prefix = "judge.submission-events", name = ["publish-enabled"], havingValue = "true")
 class SubmissionEventPublisher(
     @Qualifier("submissionSnsClient") private val snsClient: SnsClient,
     private val properties: SubmissionEventProperties,

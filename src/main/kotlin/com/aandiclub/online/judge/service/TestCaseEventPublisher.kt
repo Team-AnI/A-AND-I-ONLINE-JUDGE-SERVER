@@ -13,7 +13,7 @@ import tools.jackson.databind.ObjectMapper
 import java.time.Instant
 
 @Service
-@ConditionalOnProperty(prefix = "judge.problem-events", name = ["publishEnabled"], havingValue = "true")
+@ConditionalOnProperty(prefix = "judge.problem-events", name = ["publish-enabled"], havingValue = "true")
 class TestCaseEventPublisher(
     @Qualifier("problemSnsClient") private val snsClient: SnsClient,
     private val properties: ProblemEventProperties,

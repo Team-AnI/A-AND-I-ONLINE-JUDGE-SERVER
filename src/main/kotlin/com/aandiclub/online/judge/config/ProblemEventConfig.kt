@@ -53,10 +53,10 @@ class ProblemEventConfig {
     fun userEventSqsClient(): SqsClient = SqsClient.create()
 
     @Bean("problemSnsClient")
-    @ConditionalOnProperty(prefix = "judge.problem-events", name = ["publishEnabled"], havingValue = "true")
+    @ConditionalOnProperty(prefix = "judge.problem-events", name = ["publish-enabled"], havingValue = "true")
     fun problemSnsClient(): SnsClient = SnsClient.create()
 
     @Bean("submissionSnsClient")
-    @ConditionalOnProperty(prefix = "judge.submission-events", name = ["publishEnabled"], havingValue = "true")
+    @ConditionalOnProperty(prefix = "judge.submission-events", name = ["publish-enabled"], havingValue = "true")
     fun submissionSnsClient(): SnsClient = SnsClient.create()
 }
