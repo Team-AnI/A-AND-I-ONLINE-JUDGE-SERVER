@@ -145,7 +145,7 @@ void main() {
     final runnerPath = '${Directory.current.path}/runner.dart';
 
     Future<Map<String, dynamic>> runRunner(String code, List<dynamic> args) async {
-      final process = await Process.start('dart', ['run', runnerPath]);
+      final process = await Process.start(Platform.resolvedExecutable, ['run', runnerPath]);
       process.stdin.write(jsonEncode({'code': code, 'args': args}));
       await process.stdin.close();
       final output = await process.stdout.transform(utf8.decoder).join();
@@ -174,6 +174,24 @@ void main() {
       final result = await runRunner('int solution(int a, int b) => a + b;', [3, 5]);
       expect(result['error'], isNull);
       expect(result['output'], equals(8));
+    });
+
+    test('supports Dart SDK imports from user code', () async {
+      final result = await runRunner(
+        "import 'dart:math';\nint solution(int x) => max(x, 10);",
+        [3],
+      );
+      expect(result['error'], isNull);
+      expect(result['output'], equals(10));
+    });
+
+    test('rejects non-SDK package imports', () async {
+      final result = await runRunner(
+        "import 'package:test/test.dart';\nint solution(int x) => x;",
+        [3],
+      );
+      expect(result['error'], startsWith('COMPILE_ERROR: only Dart SDK standard library imports are allowed'));
+      expect(result['output'], isNull);
     });
   });
 }

@@ -237,6 +237,11 @@ class TestRunnerEndToEnd(unittest.TestCase):
         self.assertIsNone(result["error"])
         self.assertEqual({"a": 1, "b": 2}, result["output"])
 
+    def test_supports_python_stdlib_import(self):
+        result = self._run("import math\n\ndef solution(n): return math.isqrt(n)", [81])
+        self.assertIsNone(result["error"])
+        self.assertEqual(9, result["output"])
+
 
 if __name__ == "__main__":
     unittest.main()

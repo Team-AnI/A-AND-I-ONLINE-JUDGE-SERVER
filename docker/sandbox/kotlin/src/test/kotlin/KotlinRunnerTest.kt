@@ -240,6 +240,37 @@ class KotlinRunnerTest {
         assert(!output.contains("@")) { "메모리 주소 형태로 출력됨: $output" }
     }
 
+    @Test fun `generated code supports Kotlin and JDK standard imports`() {
+        val result = runGeneratedSolution(
+            code = """
+                import java.util.PriorityQueue
+                import kotlin.math.max
+
+                fun solution(n: Int): Int {
+                    val pq = PriorityQueue<Int>()
+                    pq.add(max(n, 5))
+                    pq.add(10)
+                    return pq.remove()
+                }
+            """.trimIndent(),
+            argsLiteral = "3",
+        )
+        assertEquals("OK", result.getString("status"))
+        assertEquals(5, result.getInt("output"))
+    }
+
+    @Test fun `prepareKotlinSource rejects package declarations`() {
+        val prepared = prepareKotlinSource(
+            """
+                package judge
+
+                fun solution(n: Int): Int = n
+            """.trimIndent()
+        )
+
+        assertEquals("package declarations are not supported", prepared.error)
+    }
+
     // ── judgeToJsonLiteral: primitive 배열 직렬화 ─────────────────────────
 
     @Test fun `judgeToJsonLiteral serializes IntArray`() {

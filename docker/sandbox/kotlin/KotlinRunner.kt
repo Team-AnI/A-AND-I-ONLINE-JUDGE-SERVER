@@ -3,6 +3,13 @@ import org.json.JSONObject
 import java.io.File
 
 private const val KOTLIN_LIB_CLASSPATH = "/opt/kotlinc/lib/*"
+private val KOTLIN_IMPORT_DIRECTIVE = Regex("""^\s*import\s+.+$""")
+
+data class PreparedKotlinSource(
+    val imports: List<String>,
+    val body: String,
+    val error: String? = null,
+)
 
 fun main() {
     val raw = System.`in`.bufferedReader().readText()
@@ -21,8 +28,15 @@ fun main() {
     val tmpDir = File("/tmp/judge_${System.nanoTime()}").also { it.mkdirs() }
     val sourceFile = File(tmpDir, "Solution.kt")
     val resultFile = File(tmpDir, "result.txt")
+    val preparedSource = prepareKotlinSource(code)
 
-    sourceFile.writeText(buildSolutionSource(code, argsLiteral, resultFile.absolutePath))
+    if (preparedSource.error != null) {
+        tmpDir.deleteRecursively()
+        println(buildErrorJson("COMPILE_ERROR: ${preparedSource.error}", 0.0))
+        return
+    }
+
+    sourceFile.writeText(buildSolutionSource(preparedSource, argsLiteral, resultFile.absolutePath))
 
     val solutionJar = File(tmpDir, "solution.jar")
 
@@ -104,8 +118,76 @@ fun toLiteral(value: Any?): String = when (value) {
 
 /** Generates Solution.kt source: user code + main() that writes result to a file. */
 fun buildSolutionSource(code: String, argsLiteral: String, resultFilePath: String): String {
+    val preparedSource = prepareKotlinSource(code)
+    require(preparedSource.error == null) { preparedSource.error ?: "invalid Kotlin source" }
+    return buildSolutionSource(preparedSource, argsLiteral, resultFilePath)
+}
+
+fun prepareKotlinSource(code: String): PreparedKotlinSource {
+    val imports = mutableListOf<String>()
+    val body = mutableListOf<String>()
+    var inDirectiveSection = true
+    var inBlockComment = false
+
+    for (line in code.lineSequence()) {
+        val trimmed = line.trim()
+
+        if (inDirectiveSection) {
+            if (inBlockComment) {
+                body += line
+                if ("*/" in trimmed) {
+                    inBlockComment = false
+                }
+                continue
+            }
+
+            if (trimmed.isEmpty() || trimmed.startsWith("//")) {
+                body += line
+                continue
+            }
+
+            if (trimmed.startsWith("/*")) {
+                body += line
+                if (!trimmed.contains("*/")) {
+                    inBlockComment = true
+                }
+                continue
+            }
+
+            if (trimmed.startsWith("package ")) {
+                return PreparedKotlinSource(
+                    imports = imports,
+                    body = code,
+                    error = "package declarations are not supported",
+                )
+            }
+
+            if (KOTLIN_IMPORT_DIRECTIVE.matches(line)) {
+                imports += trimmed
+                continue
+            }
+
+            inDirectiveSection = false
+        }
+
+        body += line
+    }
+
+    return PreparedKotlinSource(imports = imports, body = body.joinToString("\n"))
+}
+
+fun buildSolutionSource(preparedSource: PreparedKotlinSource, argsLiteral: String, resultFilePath: String): String {
     val safeResultPath = resultFilePath.replace("\\", "\\\\").replace("\"", "\\\"")
-    return "import java.io.File\n\n" +
+    val importLines = buildList {
+        preparedSource.imports.forEach { importLine ->
+            if (importLine != "import java.io.File") {
+                add(importLine)
+            }
+        }
+        add("import java.io.File")
+    }.joinToString("\n")
+
+    return importLines + "\n\n" +
         "fun __judgeQuoteJson(value: String): String = buildString {\n" +
         "    append('\"')\n" +
         "    value.forEach { ch ->\n" +
@@ -133,7 +215,7 @@ fun buildSolutionSource(code: String, argsLiteral: String, resultFilePath: Strin
         "    }\n" +
         "    else -> __judgeQuoteJson(value.toString())\n" +
         "}\n\n" +
-        code + "\n\n" +
+        preparedSource.body + "\n\n" +
         "fun main() {\n" +
         "    val resultFile = File(\"$safeResultPath\")\n" +
         "    val t0 = System.nanoTime()\n" +
