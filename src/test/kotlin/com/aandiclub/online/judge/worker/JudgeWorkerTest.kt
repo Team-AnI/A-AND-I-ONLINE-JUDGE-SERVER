@@ -1,8 +1,8 @@
 package com.aandiclub.online.judge.worker
 
-import com.aandiclub.online.judge.config.SandboxProperties
 import com.aandiclub.online.judge.config.ProblemCatalogProperties
 import com.aandiclub.online.judge.config.ProblemItem
+import com.aandiclub.online.judge.config.SandboxProperties
 import com.aandiclub.online.judge.domain.Language
 import com.aandiclub.online.judge.domain.Problem
 import com.aandiclub.online.judge.domain.Submission
@@ -11,15 +11,17 @@ import com.aandiclub.online.judge.domain.TestCase
 import com.aandiclub.online.judge.domain.TestCaseStatus
 import com.aandiclub.online.judge.repository.ProblemRepository
 import com.aandiclub.online.judge.repository.SubmissionRepository
-import com.aandiclub.online.judge.sandbox.SandboxInput
-import com.aandiclub.online.judge.sandbox.SandboxOutput
+import com.aandiclub.online.judge.sandbox.SandboxCaseInput
+import com.aandiclub.online.judge.sandbox.SandboxCaseOutput
 import com.aandiclub.online.judge.sandbox.SandboxRunner
+import com.aandiclub.online.judge.service.JudgePerformanceMonitorService
 import com.aandiclub.online.judge.service.SubmissionEventPublisher
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -35,12 +37,13 @@ class JudgeWorkerTest {
     private val objectMapper = ObjectMapper()
     private val sandboxProperties = SandboxProperties(memoryLimitMb = 128)
     private val submissionEventPublisher = mockk<SubmissionEventPublisher>(relaxed = true)
+    private val judgePerformanceMonitorService = mockk<JudgePerformanceMonitorService>(relaxed = true)
     private val problemCatalogProperties = ProblemCatalogProperties(
         items = mapOf(
             "quiz-101" to ProblemItem(
-                testCases = quiz101Cases
-            )
-        )
+                testCases = quiz101Cases,
+            ),
+        ),
     )
 
     private val judgeWorker = JudgeWorker(
@@ -51,6 +54,7 @@ class JudgeWorkerTest {
         sandboxProperties = sandboxProperties,
         problemRepository = problemRepository,
         problemCatalogProperties = problemCatalogProperties,
+        judgePerformanceMonitorService = judgePerformanceMonitorService,
         submissionEventPublisher = submissionEventPublisher,
     )
 
@@ -70,33 +74,43 @@ class JudgeWorkerTest {
         )
         val testCases = listOf(TestCase(caseId = 1, args = listOf(3, 5), expectedOutput = 8))
         coEvery {
-            sandboxRunner.run(Language.PYTHON, SandboxInput(submission.code, listOf(3, 5)))
-        } returns SandboxOutput(
-            status = TestCaseStatus.PASSED,
-            output = 8,
-            error = null,
-            timeMs = 1.2,
-            memoryMb = 2.1,
-        )
+            sandboxRunner.runCase(
+                Language.PYTHON,
+                submission.code,
+                SandboxCaseInput(caseId = 1, args = listOf(3, 5)),
+            )
+        } returns
+            SandboxCaseOutput(
+                caseId = 1,
+                status = TestCaseStatus.PASSED,
+                output = 8,
+                error = null,
+                timeMs = 1.2,
+                memoryMb = 2.1,
+            )
         every { submissionRepository.save(any()) } answers { Mono.just(firstArg()) }
         every { redisTemplate.convertAndSend(any(), any()) } returns Mono.just(1L)
 
         judgeWorker.execute(submission, testCases)
 
         coVerify(exactly = 1) {
-            sandboxRunner.run(Language.PYTHON, SandboxInput(submission.code, listOf(3, 5)))
+            sandboxRunner.runCase(
+                Language.PYTHON,
+                submission.code,
+                SandboxCaseInput(caseId = 1, args = listOf(3, 5)),
+            )
         }
         verify(atLeast = 2) { submissionRepository.save(any()) }
         verify {
             redisTemplate.convertAndSend(
                 "submission:sub-1",
-                match { it.contains("\"caseId\":1") && it.contains("\"status\":\"PASSED\"") }
+                match { it.contains("\"caseId\":1") && it.contains("\"status\":\"PASSED\"") },
             )
         }
         verify {
             redisTemplate.convertAndSend(
                 "submission:sub-1",
-                match { it.contains("\"event\":\"done\"") && it.contains("\"overallStatus\":\"ACCEPTED\"") }
+                match { it.contains("\"event\":\"done\"") && it.contains("\"overallStatus\":\"ACCEPTED\"") },
             )
         }
         coVerify(exactly = 1) {
@@ -121,13 +135,15 @@ class JudgeWorkerTest {
             code = "def solution(a,b): return a+b",
         )
         val testCases = listOf(TestCase(caseId = 1, args = listOf(3, 5), expectedOutput = 8))
-        coEvery { sandboxRunner.run(Language.PYTHON, any()) } returns SandboxOutput(
-            status = TestCaseStatus.PASSED,
-            output = 7,
-            error = null,
-            timeMs = 1.0,
-            memoryMb = 2.0,
-        )
+        coEvery { sandboxRunner.runCase(Language.PYTHON, submission.code, any()) } returns
+            SandboxCaseOutput(
+                caseId = 1,
+                status = TestCaseStatus.PASSED,
+                output = 7,
+                error = null,
+                timeMs = 1.0,
+                memoryMb = 2.0,
+            )
         every { submissionRepository.save(any()) } answers { Mono.just(firstArg()) }
         every { redisTemplate.convertAndSend(any(), any()) } returns Mono.just(1L)
 
@@ -138,7 +154,7 @@ class JudgeWorkerTest {
         verify {
             redisTemplate.convertAndSend(
                 "submission:sub-2",
-                match { it.contains("\"event\":\"done\"") && it.contains("\"overallStatus\":\"WRONG_ANSWER\"") }
+                match { it.contains("\"event\":\"done\"") && it.contains("\"overallStatus\":\"WRONG_ANSWER\"") },
             )
         }
     }
@@ -161,11 +177,11 @@ class JudgeWorkerTest {
         assertEquals(SubmissionStatus.RUNTIME_ERROR, submission.status)
         assertEquals(1, submission.testCaseResults.size)
         assertEquals(TestCaseStatus.RUNTIME_ERROR, submission.testCaseResults.first().status)
-        coVerify(exactly = 0) { sandboxRunner.run(any(), any()) }
+        coVerify(exactly = 0) { sandboxRunner.runCase(any(), any(), any()) }
         verify {
             redisTemplate.convertAndSend(
                 "submission:sub-3",
-                match { it.contains("\"event\":\"done\"") && it.contains("\"overallStatus\":\"RUNTIME_ERROR\"") }
+                match { it.contains("\"event\":\"done\"") && it.contains("\"overallStatus\":\"RUNTIME_ERROR\"") },
             )
         }
     }
@@ -181,13 +197,15 @@ class JudgeWorkerTest {
             code = "def solution(a,b): return a+b",
         )
         val testCases = listOf(TestCase(caseId = 1, args = listOf(3, 5), expectedOutput = 8))
-        coEvery { sandboxRunner.run(Language.PYTHON, any()) } returns SandboxOutput(
-            status = TestCaseStatus.PASSED,
-            output = 8,
-            error = null,
-            timeMs = 5.0,
-            memoryMb = 256.0,
-        )
+        coEvery { sandboxRunner.runCase(Language.PYTHON, submission.code, any()) } returns
+            SandboxCaseOutput(
+                caseId = 1,
+                status = TestCaseStatus.PASSED,
+                output = 8,
+                error = null,
+                timeMs = 5.0,
+                memoryMb = 256.0,
+            )
         every { submissionRepository.save(any()) } answers { Mono.just(firstArg()) }
         every { redisTemplate.convertAndSend(any(), any()) } returns Mono.just(1L)
 
@@ -198,7 +216,7 @@ class JudgeWorkerTest {
         verify {
             redisTemplate.convertAndSend(
                 "submission:sub-4",
-                match { it.contains("\"event\":\"done\"") && it.contains("\"overallStatus\":\"MEMORY_LIMIT_EXCEEDED\"") }
+                match { it.contains("\"event\":\"done\"") && it.contains("\"overallStatus\":\"MEMORY_LIMIT_EXCEEDED\"") },
             )
         }
     }
@@ -213,21 +231,72 @@ class JudgeWorkerTest {
             language = Language.PYTHON,
             code = "def solution(a,b): return a+b",
         )
-        coEvery { sandboxRunner.run(Language.PYTHON, any()) } returns SandboxOutput(
-            status = TestCaseStatus.PASSED,
-            output = 0,
-            error = null,
-            timeMs = 1.0,
-            memoryMb = 2.0,
-        )
+        coEvery { sandboxRunner.runCase(Language.PYTHON, submission.code, any()) } answers {
+            val input = thirdArg<SandboxCaseInput>()
+            SandboxCaseOutput(
+                caseId = input.caseId,
+                status = TestCaseStatus.PASSED,
+                output = 0,
+                error = null,
+                timeMs = 1.0,
+                memoryMb = 2.0,
+            )
+        }
         every { submissionRepository.save(any()) } answers { Mono.just(firstArg()) }
         every { redisTemplate.convertAndSend(any(), any()) } returns Mono.just(1L)
 
         judgeWorker.execute(submission)
 
-        coVerify(exactly = 10) { sandboxRunner.run(Language.PYTHON, any()) }
+        coVerify(exactly = 10) {
+            sandboxRunner.runCase(
+                Language.PYTHON,
+                submission.code,
+                any(),
+            )
+        }
         assertEquals(SubmissionStatus.WRONG_ANSWER, submission.status)
         assertEquals(10, submission.testCaseResults.size)
+    }
+
+    @Test
+    fun `execute preserves final test case order while publishing as cases complete`() = runTest {
+        val submission = Submission(
+            id = "sub-6",
+            submitterId = "user-1",
+            submitterPublicCode = "A00123",
+            problemId = "quiz-101",
+            language = Language.PYTHON,
+            code = "def solution(a,b): return a+b",
+        )
+        val testCases = listOf(
+            TestCase(caseId = 1, args = listOf(3, 5), expectedOutput = 8),
+            TestCase(caseId = 2, args = listOf(10, 2), expectedOutput = 12),
+        )
+        coEvery { sandboxRunner.runCase(Language.PYTHON, submission.code, any()) } coAnswers {
+            val input = thirdArg<SandboxCaseInput>()
+            if (input.caseId == 1) delay(100)
+            SandboxCaseOutput(
+                caseId = input.caseId,
+                status = TestCaseStatus.PASSED,
+                output = input.args.filterIsInstance<Number>().sumOf { it.toInt() },
+                error = null,
+                timeMs = 1.0,
+                memoryMb = 2.0,
+            )
+        }
+        every { submissionRepository.save(any()) } answers { Mono.just(firstArg()) }
+        every { redisTemplate.convertAndSend(any(), any()) } returns Mono.just(1L)
+
+        judgeWorker.execute(submission, testCases)
+
+        assertEquals(listOf(1, 2), submission.testCaseResults.map { it.caseId })
+        assertEquals(listOf(8, 12), submission.testCaseResults.map { it.output })
+        verify(exactly = 2) {
+            redisTemplate.convertAndSend(
+                "submission:sub-6",
+                match { it.contains("\"caseId\":") && it.contains("\"status\":\"PASSED\"") },
+            )
+        }
     }
 
     companion object {

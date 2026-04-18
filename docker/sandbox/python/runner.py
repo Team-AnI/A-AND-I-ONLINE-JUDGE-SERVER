@@ -1,8 +1,10 @@
-import sys
 import json
-import time
-import tracemalloc
 import math
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
 
 
 def normalize_json_value(value):
@@ -16,58 +18,214 @@ def normalize_json_value(value):
         return [normalize_json_value(item) for item in value]
     return str(value)
 
-def execute_solution(namespace, args):
+
+def build_case_result(*, status, output=None, error=None, time_ms=0.0, memory_mb=0.0, case_id=None):
+    payload = {
+        "status": status,
+        "output": output,
+        "error": error,
+        "timeMs": time_ms,
+        "memoryMb": memory_mb,
+    }
+    if case_id is not None:
+        payload["caseId"] = case_id
+    return payload
+
+
+def validate_solution_code(code):
+    namespace = {}
+    try:
+        compiled = compile(code, "<solution>", "exec")
+    except SyntaxError as e:
+        return None, f"COMPILE_ERROR: {e}"
+    except Exception as e:
+        return None, f"INTERNAL_ERROR: failed to compile input: {e}"
+
+    try:
+        exec(compiled, namespace)
+    except Exception as e:
+        return None, f"RUNTIME_ERROR: {e}"
+
+    if "solution" not in namespace or not callable(namespace["solution"]):
+        return None, "RUNTIME_ERROR: 'solution' function not defined"
+
+    return compiled, None
+
+
+def execute_solution(namespace, args, case_id=None):
     """
     Measure only the user function call window.
     Excludes parse/compile/bootstrap overhead from memory/time measurement.
     """
+    tracemalloc = __import__("tracemalloc")
     tracemalloc.start()
     start_ns = time.perf_counter_ns()
     try:
         result = namespace["solution"](*args)
-        error = None
         output = normalize_json_value(result)
+        error = None
+        status = "PASSED"
     except Exception as e:
         output = None
         error = f"RUNTIME_ERROR: {e}"
+        status = "RUNTIME_ERROR"
     finally:
         elapsed_ms = (time.perf_counter_ns() - start_ns) / 1_000_000.0
         _, peak_bytes = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
-    return {
-        "output": output,
-        "error": error,
-        "timeMs": elapsed_ms,
-        "memoryMb": peak_bytes / (1024 * 1024),
-    }
+    return build_case_result(
+        case_id=case_id,
+        status=status,
+        output=output,
+        error=error,
+        time_ms=elapsed_ms,
+        memory_mb=peak_bytes / (1024 * 1024),
+    )
+
+
+def execute_single(code, args):
+    namespace = {}
+    try:
+        compiled = compile(code, "<solution>", "exec")
+        exec(compiled, namespace)
+    except SyntaxError as e:
+        return build_case_result(status="COMPILE_ERROR", error=f"COMPILE_ERROR: {e}")
+    except Exception as e:
+        return build_case_result(status="RUNTIME_ERROR", error=f"RUNTIME_ERROR: {e}")
+
+    if "solution" not in namespace or not callable(namespace["solution"]):
+        return build_case_result(status="RUNTIME_ERROR", error="RUNTIME_ERROR: 'solution' function not defined")
+
+    return execute_solution(namespace, args)
+
+
+def run_case_subprocess(code_path, args, time_limit_ms, case_id):
+    payload = json.dumps({"codePath": str(code_path), "args": args})
+    try:
+        proc = subprocess.run(
+            [sys.executable, __file__, "--child"],
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=max(time_limit_ms / 1000.0, 0.1) + 0.1,
+        )
+    except subprocess.TimeoutExpired:
+        return build_case_result(
+            case_id=case_id,
+            status="TIME_LIMIT_EXCEEDED",
+            output=None,
+            error=f"TIME_LIMIT_EXCEEDED: execution exceeded {time_limit_ms}ms limit",
+            time_ms=float(time_limit_ms),
+            memory_mb=0.0,
+        )
+
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    if not stdout:
+        return build_case_result(
+            case_id=case_id,
+            status="RUNTIME_ERROR",
+            output=None,
+            error=f"RUNTIME_ERROR: {stderr or 'child produced no output'}",
+            time_ms=0.0,
+            memory_mb=0.0,
+        )
+
+    try:
+        result = json.loads(stdout)
+    except Exception as e:
+        return build_case_result(
+            case_id=case_id,
+            status="RUNTIME_ERROR",
+            output=None,
+            error=f"RUNTIME_ERROR: failed to parse child output: {e}",
+            time_ms=0.0,
+            memory_mb=0.0,
+        )
+
+    result["caseId"] = case_id
+    result.setdefault("status", "PASSED" if result.get("error") is None else "RUNTIME_ERROR")
+    result["timeMs"] = float(result.get("timeMs", 0.0) or 0.0)
+    result["memoryMb"] = float(result.get("memoryMb", 0.0) or 0.0)
+    return result
+
+
+def execute_bulk(code, cases, time_limit_ms):
+    _, validation_error = validate_solution_code(code)
+    if validation_error is not None:
+        return {
+            "results": [
+                build_case_result(
+                    case_id=case.get("caseId"),
+                    status="COMPILE_ERROR" if validation_error.startswith("COMPILE_ERROR") else "RUNTIME_ERROR",
+                    output=None,
+                    error=validation_error,
+                    time_ms=0.0,
+                    memory_mb=0.0,
+                )
+                for case in cases
+            ]
+        }
+
+    with tempfile.TemporaryDirectory(prefix="judge_") as tmp_dir:
+        code_path = Path(tmp_dir) / "solution.py"
+        code_path.write_text(code, encoding="utf-8")
+        results = [
+            run_case_subprocess(
+                code_path=code_path,
+                args=case.get("args", []),
+                time_limit_ms=time_limit_ms,
+                case_id=case.get("caseId"),
+            )
+            for case in cases
+        ]
+    return {"results": results}
+
+
+def child_main():
+    try:
+        payload = json.loads(sys.stdin.read())
+    except Exception as e:
+        print(json.dumps(build_case_result(status="INTERNAL_ERROR", error=f"INTERNAL_ERROR: failed to parse input: {e}")))
+        return
+
+    code_path = payload.get("codePath")
+    args = payload.get("args", [])
+    if not code_path:
+        print(json.dumps(build_case_result(status="INTERNAL_ERROR", error="INTERNAL_ERROR: codePath is required")))
+        return
+
+    try:
+        code = Path(code_path).read_text(encoding="utf-8")
+    except Exception as e:
+        print(json.dumps(build_case_result(status="INTERNAL_ERROR", error=f"INTERNAL_ERROR: failed to read code: {e}")))
+        return
+
+    print(json.dumps(execute_single(code, args)))
+
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--child":
+        child_main()
+        return
+
     try:
-        raw = sys.stdin.read()
-        payload = json.loads(raw)
+        payload = json.loads(sys.stdin.read())
     except Exception as e:
-        print(json.dumps({"output": None, "error": f"INTERNAL_ERROR: failed to parse input: {e}", "timeMs": 0.0, "memoryMb": 0.0}))
+        print(json.dumps(build_case_result(status="INTERNAL_ERROR", error=f"INTERNAL_ERROR: failed to parse input: {e}")))
         sys.exit(1)
 
     code = payload.get("code", "")
+    if "cases" in payload:
+        cases = payload.get("cases") or []
+        time_limit_ms = int(payload.get("timeLimitMs", 0) or 0)
+        print(json.dumps(execute_bulk(code, cases, time_limit_ms)))
+        return
+
     args = payload.get("args", [])
+    print(json.dumps(execute_single(code, args)))
 
-    namespace = {}
-    try:
-        exec(compile(code, "<solution>", "exec"), namespace)
-    except SyntaxError as e:
-        print(json.dumps({"output": None, "error": f"COMPILE_ERROR: {e}", "timeMs": 0.0, "memoryMb": 0.0}))
-        sys.exit(0)
-    except Exception as e:
-        print(json.dumps({"output": None, "error": f"RUNTIME_ERROR: {e}", "timeMs": 0.0, "memoryMb": 0.0}))
-        sys.exit(0)
-
-    if "solution" not in namespace or not callable(namespace["solution"]):
-        print(json.dumps({"output": None, "error": "RUNTIME_ERROR: 'solution' function not defined", "timeMs": 0.0, "memoryMb": 0.0}))
-        sys.exit(0)
-
-    print(json.dumps(execute_solution(namespace, args)))
 
 if __name__ == "__main__":
     main()

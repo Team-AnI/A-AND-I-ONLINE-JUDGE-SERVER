@@ -3,13 +3,13 @@ package com.aandiclub.online.judge.sandbox
 import com.aandiclub.online.judge.config.SandboxProperties
 import com.aandiclub.online.judge.domain.Language
 import com.aandiclub.online.judge.domain.TestCaseStatus
-import tools.jackson.databind.ObjectMapper
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import tools.jackson.databind.ObjectMapper
 import java.lang.reflect.Method
 
 class SandboxRunnerTest {
@@ -22,15 +22,13 @@ class SandboxRunnerTest {
         images = mapOf(
             "python" to "judge-sandbox-python:latest",
             "kotlin" to "judge-sandbox-kotlin:latest",
-            "dart"   to "judge-sandbox-dart:latest",
+            "dart" to "judge-sandbox-dart:latest",
         ),
     )
 
     private val objectMapper = ObjectMapper()
     private val dockerStatsClient = mockk<DockerStatsClient>(relaxed = true)
     private val runner = SandboxRunner(properties, objectMapper, dockerStatsClient)
-
-    // ── 설정 로드 ─────────────────────────────────────────────────────────
 
     @Test
     fun `sandbox properties are loaded correctly`() {
@@ -42,8 +40,6 @@ class SandboxRunnerTest {
         assertEquals("judge-sandbox-kotlin:latest", properties.images["kotlin"])
         assertEquals("judge-sandbox-dart:latest", properties.images["dart"])
     }
-
-    // ── 미설정 언어 처리 ──────────────────────────────────────────────────
 
     @Test
     fun `run throws IllegalStateException when language image is not configured`() = runTest {
@@ -59,8 +55,6 @@ class SandboxRunnerTest {
         }
         assert(ex.message!!.contains("PYTHON"))
     }
-
-    // ── SandboxInput / SandboxOutput 데이터 클래스 ────────────────────────
 
     @Test
     fun `SandboxInput stores code and args correctly`() {
@@ -101,7 +95,7 @@ class SandboxRunnerTest {
     @Test
     fun `parseRunnerOutput preserves numeric output types`() {
         val result = parseRunnerOutput(
-            """{"output":2,"error":null,"timeMs":1.2,"memoryMb":0.5}""",
+            """{"status":"PASSED","output":2,"error":null,"timeMs":1.2,"memoryMb":0.5}""",
             exitCode = 0,
             language = Language.PYTHON,
             externalMemoryMb = 0.0,
@@ -110,6 +104,18 @@ class SandboxRunnerTest {
         assertEquals(TestCaseStatus.PASSED, result.status)
         assertEquals(2, result.output)
         assertEquals(null, result.error)
+    }
+
+    @Test
+    fun `parseRunnerOutput recognizes explicit time limit status`() {
+        val result = parseRunnerOutput(
+            """{"status":"TIME_LIMIT_EXCEEDED","output":null,"error":"TIME_LIMIT_EXCEEDED: execution exceeded 1000ms limit","timeMs":1000.0,"memoryMb":0.0}""",
+            exitCode = 0,
+            language = Language.PYTHON,
+            externalMemoryMb = 0.0,
+        )
+
+        assertEquals(TestCaseStatus.TIME_LIMIT_EXCEEDED, result.status)
     }
 
     private fun parseRunnerOutput(

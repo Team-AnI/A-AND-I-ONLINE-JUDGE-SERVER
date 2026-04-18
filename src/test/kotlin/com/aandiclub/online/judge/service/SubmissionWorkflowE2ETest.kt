@@ -6,8 +6,8 @@ import com.aandiclub.online.judge.domain.Submission
 import com.aandiclub.online.judge.domain.SubmissionStatus
 import com.aandiclub.online.judge.domain.TestCaseStatus
 import com.aandiclub.online.judge.repository.SubmissionRepository
-import com.aandiclub.online.judge.sandbox.SandboxInput
-import com.aandiclub.online.judge.sandbox.SandboxOutput
+import com.aandiclub.online.judge.sandbox.SandboxCaseInput
+import com.aandiclub.online.judge.sandbox.SandboxCaseOutput
 import com.aandiclub.online.judge.sandbox.SandboxRunner
 import com.ninjasquad.springmockk.MockkBean
 import io.mockk.coEvery
@@ -17,7 +17,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.server.LocalServerPort
@@ -30,7 +29,6 @@ import org.springframework.test.web.reactive.server.WebTestClient
 import org.testcontainers.containers.MongoDBContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
-import org.junit.jupiter.api.condition.DisabledIfEnvironmentVariable
 import reactor.core.publisher.Flux
 import reactor.core.publisher.Mono
 import java.util.concurrent.atomic.AtomicInteger
@@ -82,7 +80,6 @@ class SubmissionWorkflowE2ETest {
             )
         ).block()
 
-        // Mock Redis operations for deduplication
         val valueOps = io.mockk.mockk<org.springframework.data.redis.core.ReactiveValueOperations<String, String>>()
         every { redisTemplate.opsForValue() } returns valueOps
         every { valueOps.get(any()) } returns Mono.empty()
@@ -90,17 +87,18 @@ class SubmissionWorkflowE2ETest {
 
         every { redisTemplate.convertAndSend(any(), any()) } returns Mono.just(1L)
         every { listenerContainer.receive(any<ChannelTopic>()) } returns Flux.empty()
-        coEvery { sandboxRunner.run(any(), any<SandboxInput>()) } answers {
-            val input = secondArg<SandboxInput>()
-            val sum = input.args.sumOf { (it as Number).toInt() }
-            SandboxOutput(
+        coEvery { sandboxRunner.runCase(any(), any(), any()) } answers {
+            val case = thirdArg<SandboxCaseInput>()
+            SandboxCaseOutput(
+                caseId = case.caseId,
                 status = TestCaseStatus.PASSED,
-                output = sum,
+                output = case.args.sumOf { (it as Number).toInt() },
                 error = null,
                 timeMs = 1.2,
                 memoryMb = 2.4,
             )
         }
+
         webTestClient = WebTestClient.bindToServer()
             .baseUrl("http://localhost:$port")
             .build()
@@ -156,16 +154,16 @@ class SubmissionWorkflowE2ETest {
         val active = AtomicInteger(0)
         val maxActive = AtomicInteger(0)
 
-        coEvery { sandboxRunner.run(Language.PYTHON, any<SandboxInput>()) } coAnswers {
+        coEvery { sandboxRunner.runCase(Language.PYTHON, any(), any()) } coAnswers {
             val now = active.incrementAndGet()
             maxActive.updateAndGet { prev -> max(prev, now) }
             try {
                 delay(300)
-                val input = secondArg<SandboxInput>()
-                val sum = input.args.sumOf { (it as Number).toInt() }
-                SandboxOutput(
+                val case = thirdArg<SandboxCaseInput>()
+                SandboxCaseOutput(
+                    caseId = case.caseId,
                     status = TestCaseStatus.PASSED,
-                    output = sum,
+                    output = case.args.sumOf { (it as Number).toInt() },
                     error = null,
                     timeMs = 5.0,
                     memoryMb = 3.0,
@@ -203,7 +201,7 @@ class SubmissionWorkflowE2ETest {
                   "language": "${language.name}",
                   "code": ${objectMapper.writeValueAsString(code)}
                 }
-                """.trimIndent()
+                """.trimIndent(),
             )
             .exchange()
             .expectStatus().isAccepted

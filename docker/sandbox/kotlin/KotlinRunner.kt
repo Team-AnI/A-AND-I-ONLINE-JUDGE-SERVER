@@ -3,6 +3,8 @@ import org.json.JSONObject
 import java.io.File
 
 private const val KOTLIN_LIB_CLASSPATH = "/opt/kotlinc/lib/*"
+private const val RUNNER_CLASSPATH = "/app/lib/org.json.jar:$KOTLIN_LIB_CLASSPATH"
+private const val GENERATED_SOURCE_CLASSPATH = "/app/lib/org.json.jar"
 private val KOTLIN_IMPORT_DIRECTIVE = Regex("""^\s*import\s+.+$""")
 
 data class PreparedKotlinSource(
@@ -17,78 +19,88 @@ fun main() {
     val payload = try {
         JSONObject(raw)
     } catch (e: Exception) {
-        println(buildErrorJson("INTERNAL_ERROR: failed to parse input: ${e.message}", 0.0))
+        println(buildSingleErrorJson("INTERNAL_ERROR: failed to parse input: ${e.message}", 0.0))
         return
     }
 
     val code = payload.optString("code", "")
-    val argsJson = payload.optJSONArray("args") ?: JSONArray()
-    val argsLiteral = buildArgsLiteral(argsJson)
+    val isBatch = payload.has("cases")
+    val casesJson = if (isBatch) {
+        payload.optJSONArray("cases") ?: JSONArray()
+    } else {
+        JSONArray().put(
+            JSONObject()
+                .put("caseId", 1)
+                .put("args", payload.optJSONArray("args") ?: JSONArray())
+        )
+    }
+
+    val result = executeBatch(code, casesJson)
+    if (isBatch) {
+        println(result.toString())
+        return
+    }
+
+    val first = result.optJSONArray("results")?.optJSONObject(0)
+    if (first == null) {
+        println(buildSingleErrorJson("RUNTIME_ERROR: runner produced no single result", 0.0))
+        return
+    }
+    first.remove("caseId")
+    println(first.toString())
+}
+
+fun executeBatch(code: String, casesJson: JSONArray): JSONObject {
+    val preparedSource = prepareKotlinSource(code)
+    if (preparedSource.error != null) {
+        return buildBatchErrorJson(casesJson, "COMPILE_ERROR: ${preparedSource.error}")
+    }
 
     val tmpDir = File("/tmp/judge_${System.nanoTime()}").also { it.mkdirs() }
-    val sourceFile = File(tmpDir, "Solution.kt")
-    val resultFile = File(tmpDir, "result.txt")
-    val preparedSource = prepareKotlinSource(code)
+    return try {
+        val sourceFile = File(tmpDir, "Solution.kt")
+        val solutionJar = File(tmpDir, "solution.jar")
+        sourceFile.writeText(buildSolutionSource(preparedSource, casesJson))
 
-    if (preparedSource.error != null) {
+        val compileProc = ProcessBuilder(
+            "java",
+            "-Xms32m",
+            "-Xmx128m",
+            "-cp", RUNNER_CLASSPATH,
+            "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
+            "-classpath", GENERATED_SOURCE_CLASSPATH,
+            sourceFile.absolutePath,
+            "-d", solutionJar.absolutePath,
+        ).redirectErrorStream(true).start()
+
+        val compileOut = compileProc.inputStream.bufferedReader().readText()
+        val compileExit = compileProc.waitFor()
+        if (compileExit != 0) {
+            return buildBatchErrorJson(casesJson, "COMPILE_ERROR: ${compileOut.sanitizeForJson()}")
+        }
+
+        val runProc = ProcessBuilder(
+            "java",
+            "-cp", "${solutionJar.absolutePath}:$RUNNER_CLASSPATH",
+            "SolutionKt",
+        ).redirectErrorStream(true).start()
+
+        val runOutput = runProc.inputStream.bufferedReader().readText().trim()
+        val runExit = runProc.waitFor()
+        if (runOutput.isBlank()) {
+            return buildBatchErrorJson(
+                casesJson,
+                "RUNTIME_ERROR: compiled program produced no output (exit code $runExit)",
+            )
+        }
+
+        return try {
+            JSONObject(runOutput)
+        } catch (e: Exception) {
+            buildBatchErrorJson(casesJson, "RUNTIME_ERROR: failed to parse runner output: ${e.message}")
+        }
+    } finally {
         tmpDir.deleteRecursively()
-        println(buildErrorJson("COMPILE_ERROR: ${preparedSource.error}", 0.0))
-        return
-    }
-
-    sourceFile.writeText(buildSolutionSource(preparedSource, argsLiteral, resultFile.absolutePath))
-
-    val solutionJar = File(tmpDir, "solution.jar")
-
-    // Invoke the compiler directly to avoid kotlinc's default 512M heap,
-    // which is too large for the sandbox container memory limit.
-    val compileProc = ProcessBuilder(
-        "java",
-        "-Xms32m",
-        "-Xmx128m",
-        "-cp", KOTLIN_LIB_CLASSPATH,
-        "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
-        sourceFile.absolutePath,
-        "-d", solutionJar.absolutePath,
-    ).redirectErrorStream(true).start()
-
-    val compileOut = compileProc.inputStream.bufferedReader().readText()
-    val compileExit = compileProc.waitFor()
-
-    if (compileExit != 0) {
-        tmpDir.deleteRecursively()
-        val errMsg = compileOut.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
-        println(buildErrorJson("COMPILE_ERROR: $errMsg", 0.0))
-        return
-    }
-
-    // Run the compiled program with the Kotlin runtime on the classpath.
-    ProcessBuilder(
-        "java",
-        "-cp", "${solutionJar.absolutePath}:$KOTLIN_LIB_CLASSPATH",
-        "SolutionKt",
-    )
-        .redirectErrorStream(true)
-        .start()
-        .waitFor()
-
-    // Read result written by the compiled solution
-    val resultPayload = if (resultFile.exists()) JSONObject(resultFile.readText()) else null
-    tmpDir.deleteRecursively()
-
-    val status = resultPayload?.optString("status") ?: "RUNTIME_ERROR"
-    val timeMs = resultPayload?.optDouble("timeMs") ?: 0.0
-
-    if (status == "OK") {
-        val output = resultPayload?.opt("output")
-        println(JSONObject()
-            .put("output", if (output == null || output == JSONObject.NULL) JSONObject.NULL else output)
-            .put("error", JSONObject.NULL)
-            .put("timeMs", timeMs)
-            .put("memoryMb", 0.0)
-            .toString())
-    } else {
-        println(buildErrorJson("$status: ${resultPayload?.optString("error") ?: "no output"}", timeMs))
     }
 }
 
@@ -99,7 +111,7 @@ fun buildArgsLiteral(argsJson: JSONArray): String =
 
 fun toLiteral(value: Any?): String = when (value) {
     null, JSONObject.NULL -> "null"
-    is String -> "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+    is String -> "\"${value.replace("\\", "\\\\").replace("\"", "\\\"") }\""
     is Number, is Boolean -> value.toString()
     is JSONArray -> {
         val elements = (0 until value.length()).joinToString(", ") { toLiteral(value.get(it)) }
@@ -114,13 +126,6 @@ fun toLiteral(value: Any?): String = when (value) {
         "mapOf($entries)"
     }
     else -> value.toString()
-}
-
-/** Generates Solution.kt source: user code + main() that writes result to a file. */
-fun buildSolutionSource(code: String, argsLiteral: String, resultFilePath: String): String {
-    val preparedSource = prepareKotlinSource(code)
-    require(preparedSource.error == null) { preparedSource.error ?: "invalid Kotlin source" }
-    return buildSolutionSource(preparedSource, argsLiteral, resultFilePath)
 }
 
 fun prepareKotlinSource(code: String): PreparedKotlinSource {
@@ -176,64 +181,128 @@ fun prepareKotlinSource(code: String): PreparedKotlinSource {
     return PreparedKotlinSource(imports = imports, body = body.joinToString("\n"))
 }
 
-fun buildSolutionSource(preparedSource: PreparedKotlinSource, argsLiteral: String, resultFilePath: String): String {
-    val safeResultPath = resultFilePath.replace("\\", "\\\\").replace("\"", "\\\"")
+fun buildSolutionSource(preparedSource: PreparedKotlinSource, casesJson: JSONArray): String {
     val importLines = buildList {
         preparedSource.imports.forEach { importLine ->
-            if (importLine != "import java.io.File") {
+            if (importLine !in setOf(
+                    "import java.util.concurrent.atomic.AtomicLong",
+                    "import kotlin.math.max",
+                    "import org.json.JSONArray",
+                    "import org.json.JSONObject",
+                )
+            ) {
                 add(importLine)
             }
         }
-        add("import java.io.File")
+        add("import java.util.concurrent.atomic.AtomicLong")
+        add("import kotlin.math.max")
+        add("import org.json.JSONArray")
+        add("import org.json.JSONObject")
     }.joinToString("\n")
 
+    val caseBlocks = buildString {
+        for (index in 0 until casesJson.length()) {
+            val caseItem = casesJson.getJSONObject(index)
+            val caseId = caseItem.getInt("caseId")
+            val argsLiteral = buildArgsLiteral(caseItem.optJSONArray("args") ?: JSONArray())
+            appendLine("    run {")
+            appendLine("        val runtime = Runtime.getRuntime()")
+            appendLine("        val peakBytes = AtomicLong(max(0L, runtime.totalMemory() - runtime.freeMemory()))")
+            appendLine("        var sampling = true")
+            appendLine("        val sampler = Thread {")
+            appendLine("            while (sampling) {")
+            appendLine("                val used = max(0L, runtime.totalMemory() - runtime.freeMemory())")
+            appendLine("                var current = peakBytes.get()")
+            appendLine("                while (used > current && !peakBytes.compareAndSet(current, used)) {")
+            appendLine("                    current = peakBytes.get()")
+            appendLine("                }")
+            appendLine("                try {")
+            appendLine("                    Thread.sleep(1)")
+            appendLine("                } catch (_: InterruptedException) {")
+            appendLine("                    break")
+            appendLine("                }")
+            appendLine("            }")
+            appendLine("        }.also { it.isDaemon = true; it.start() }")
+            appendLine("        val t0 = System.nanoTime()")
+            appendLine("        try {")
+            appendLine("            val result = solution($argsLiteral)")
+            appendLine("            val ms = (System.nanoTime() - t0) / 1_000_000.0")
+            appendLine("            sampling = false")
+            appendLine("            sampler.interrupt()")
+            appendLine("            sampler.join(50)")
+            appendLine("            results.put(__judgeRecord($caseId, \"PASSED\", result, null, ms, peakBytes.get() / (1024.0 * 1024.0)))")
+            appendLine("        } catch (e: Throwable) {")
+            appendLine("            val ms = (System.nanoTime() - t0) / 1_000_000.0")
+            appendLine("            sampling = false")
+            appendLine("            sampler.interrupt()")
+            appendLine("            sampler.join(50)")
+            appendLine("            val root = e.cause ?: e")
+            appendLine("            results.put(__judgeRecord($caseId, \"RUNTIME_ERROR\", null, \"RUNTIME_ERROR: ${'$'}{root.message ?: root::class.simpleName ?: \"unknown error\"}\", ms, peakBytes.get() / (1024.0 * 1024.0)))")
+            appendLine("        }")
+            appendLine("    }")
+        }
+    }
+
     return importLines + "\n\n" +
-        "fun __judgeQuoteJson(value: String): String = buildString {\n" +
-        "    append('\"')\n" +
-        "    value.forEach { ch ->\n" +
-        "        when (ch) {\n" +
-        "            '\\\\' -> append(\"\\\\\\\\\")\n" +
-        "            '\"' -> append(\"\\\\\\\"\")\n" +
-        "            '\\n' -> append(\"\\\\n\")\n" +
-        "            '\\r' -> append(\"\\\\r\")\n" +
-        "            '\\t' -> append(\"\\\\t\")\n" +
-        "            else -> append(ch)\n" +
-        "        }\n" +
-        "    }\n" +
-        "    append('\"')\n" +
-        "}\n\n" +
-        "fun __judgeToJsonLiteral(value: Any?): String = when {\n" +
-        "    value == null -> \"null\"\n" +
-        "    value is String -> __judgeQuoteJson(value)\n" +
-        "    value is Number || value is Boolean -> value.toString()\n" +
-        "    value is Array<*> -> value.joinToString(prefix = \"[\", postfix = \"]\") { __judgeToJsonLiteral(it) }\n" +
-        "    value is Iterable<*> -> value.joinToString(prefix = \"[\", postfix = \"]\") { __judgeToJsonLiteral(it) }\n" +
-        "    value is Map<*, *> -> value.entries.joinToString(prefix = \"{\", postfix = \"}\") { entry -> __judgeQuoteJson(entry.key.toString()) + \":\" + __judgeToJsonLiteral(entry.value) }\n" +
+        "fun __judgeJsonCompatible(value: Any?): Any? = when {\n" +
+        "    value == null -> JSONObject.NULL\n" +
+        "    value is String || value is Number || value is Boolean -> value\n" +
+        "    value is Array<*> -> JSONArray(value.map { __judgeJsonCompatible(it) })\n" +
+        "    value is IntArray -> JSONArray(value.toList())\n" +
+        "    value is LongArray -> JSONArray(value.toList())\n" +
+        "    value is DoubleArray -> JSONArray(value.toList())\n" +
+        "    value is FloatArray -> JSONArray(value.map { it.toDouble() })\n" +
+        "    value is BooleanArray -> JSONArray(value.toList())\n" +
+        "    value is Iterable<*> -> JSONArray(value.map { __judgeJsonCompatible(it) })\n" +
+        "    value is Map<*, *> -> JSONObject(value.entries.associate { it.key.toString() to __judgeJsonCompatible(it.value) })\n" +
         "    value.javaClass.isArray -> {\n" +
         "        val length = java.lang.reflect.Array.getLength(value)\n" +
-        "        (0 until length).joinToString(prefix = \"[\", postfix = \"]\") { i -> __judgeToJsonLiteral(java.lang.reflect.Array.get(value, i)) }\n" +
+        "        JSONArray((0 until length).map { idx -> __judgeJsonCompatible(java.lang.reflect.Array.get(value, idx)) })\n" +
         "    }\n" +
-        "    else -> __judgeQuoteJson(value.toString())\n" +
+        "    else -> value.toString()\n" +
         "}\n\n" +
+        "fun __judgeRecord(caseId: Int, status: String, output: Any?, error: String?, timeMs: Double, memoryMb: Double): JSONObject =\n" +
+        "    JSONObject()\n" +
+        "        .put(\"caseId\", caseId)\n" +
+        "        .put(\"status\", status)\n" +
+        "        .put(\"output\", __judgeJsonCompatible(output))\n" +
+        "        .put(\"error\", error ?: JSONObject.NULL)\n" +
+        "        .put(\"timeMs\", timeMs)\n" +
+        "        .put(\"memoryMb\", memoryMb)\n\n" +
         preparedSource.body + "\n\n" +
         "fun main() {\n" +
-        "    val resultFile = File(\"$safeResultPath\")\n" +
-        "    val t0 = System.nanoTime()\n" +
-        "    try {\n" +
-        "        val result = solution($argsLiteral)\n" +
-        "        val ms = (System.nanoTime() - t0) / 1_000_000.0\n" +
-        "        resultFile.writeText(\"{\\\"status\\\":\\\"OK\\\",\\\"output\\\":\" + __judgeToJsonLiteral(result) + \",\\\"timeMs\\\":\" + ms + \"}\")\n" +
-        "    } catch (e: Exception) {\n" +
-        "        val ms = (System.nanoTime() - t0) / 1_000_000.0\n" +
-        "        resultFile.writeText(\"{\\\"status\\\":\\\"RUNTIME_ERROR\\\",\\\"error\\\":\" + __judgeQuoteJson(e.message ?: \"unknown error\") + \",\\\"timeMs\\\":\" + ms + \"}\")\n" +
-        "    }\n" +
+        "    val results = JSONArray()\n" +
+        caseBlocks +
+        "    println(JSONObject().put(\"results\", results).toString())\n" +
         "}\n"
 }
 
-fun buildErrorJson(error: String, timeMs: Double): String =
+fun buildBatchErrorJson(casesJson: JSONArray, error: String): JSONObject {
+    val results = JSONArray()
+    for (index in 0 until casesJson.length()) {
+        val caseItem = casesJson.getJSONObject(index)
+        results.put(
+            JSONObject()
+                .put("caseId", caseItem.getInt("caseId"))
+                .put("status", if (error.startsWith("COMPILE_ERROR")) "COMPILE_ERROR" else "RUNTIME_ERROR")
+                .put("output", JSONObject.NULL)
+                .put("error", error)
+                .put("timeMs", 0.0)
+                .put("memoryMb", 0.0)
+        )
+    }
+    return JSONObject().put("results", results)
+}
+
+fun buildSingleErrorJson(error: String, timeMs: Double): String =
     JSONObject()
+        .put("status", if (error.startsWith("COMPILE_ERROR")) "COMPILE_ERROR" else "RUNTIME_ERROR")
         .put("output", JSONObject.NULL)
         .put("error", error)
         .put("timeMs", timeMs)
         .put("memoryMb", 0.0)
         .toString()
+
+fun String.sanitizeForJson(): String = replace("\\", "\\\\")
+    .replace("\"", "\\\"")
+    .replace("\n", "\\n")

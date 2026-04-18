@@ -184,30 +184,49 @@ class KotlinRunnerTest {
 
     // ── 생성된 소스 실행: primitive 배열 직렬화 end-to-end ────────────────
 
-    private fun runGeneratedSolution(code: String, argsLiteral: String): JSONObject {
+    private fun runGeneratedSolution(code: String, argsJson: JSONArray): JSONObject {
         assumeTrue(
             runCatching { ProcessBuilder("kotlinc", "-version").start().waitFor() == 0 }.getOrDefault(false),
             "kotlinc not available"
         )
         val tmpDir = Files.createTempDirectory("kotlin-runner-test").toFile()
         try {
-            val resultFile = File(tmpDir, "result.txt")
-            val source = buildSolutionSource(code, argsLiteral, resultFile.absolutePath)
+            val preparedSource = prepareKotlinSource(code)
+            val casesJson = JSONArray().put(
+                JSONObject()
+                    .put("caseId", 1)
+                    .put("args", argsJson)
+            )
+            val source = buildSolutionSource(preparedSource, casesJson)
             val sourceFile = File(tmpDir, "solution.kt")
             sourceFile.writeText(source)
             val jarFile = File(tmpDir, "solution.jar")
+            val runtimeClassPath = System.getProperty("java.class.path")
 
-            val compile = ProcessBuilder("kotlinc", sourceFile.absolutePath, "-include-runtime", "-d", jarFile.absolutePath)
+            val compile = ProcessBuilder(
+                "kotlinc",
+                sourceFile.absolutePath,
+                "-classpath",
+                runtimeClassPath,
+                "-include-runtime",
+                "-d",
+                jarFile.absolutePath,
+            )
                 .redirectErrorStream(true)
                 .start()
-            compile.waitFor()
+            val compileExit = compile.waitFor()
+            check(compileExit == 0) { compile.inputStream.bufferedReader().readText() }
 
-            ProcessBuilder("java", "-jar", jarFile.absolutePath)
+            val runProcess = ProcessBuilder("java", "-cp", "$jarFile${File.pathSeparator}$runtimeClassPath", "SolutionKt")
                 .redirectErrorStream(true)
                 .start()
-                .waitFor()
+            val runOutput = runProcess.inputStream.bufferedReader().readText()
+            val runExit = runProcess.waitFor()
+            check(runExit == 0) { runOutput }
 
-            return JSONObject(resultFile.readText())
+            return JSONObject(runOutput)
+                .getJSONArray("results")
+                .getJSONObject(0)
         } finally {
             tmpDir.deleteRecursively()
         }
@@ -216,25 +235,25 @@ class KotlinRunnerTest {
     @Test fun `generated code serializes IntArray without memory address`() {
         val result = runGeneratedSolution(
             code = "fun solution(n: Int): IntArray = intArrayOf(1, 2, 3)",
-            argsLiteral = "0",
+            argsJson = JSONArray().put(0),
         )
-        assertEquals("OK", result.getString("status"))
+        assertEquals("PASSED", result.getString("status"))
         assertEquals("[1,2,3]", result.get("output").toString().replace(" ", ""))
     }
 
     @Test fun `generated code serializes LongArray without memory address`() {
         val result = runGeneratedSolution(
             code = "fun solution(n: Int): LongArray = longArrayOf(10L, 20L, 30L)",
-            argsLiteral = "0",
+            argsJson = JSONArray().put(0),
         )
-        assertEquals("OK", result.getString("status"))
+        assertEquals("PASSED", result.getString("status"))
         assertEquals("[10,20,30]", result.get("output").toString().replace(" ", ""))
     }
 
     @Test fun `generated code serializes IntArray not as memory address`() {
         val result = runGeneratedSolution(
             code = "fun solution(n: Int): IntArray = intArrayOf(1, 2, 3)",
-            argsLiteral = "0",
+            argsJson = JSONArray().put(0),
         )
         val output = result.get("output").toString()
         assert(!output.contains("@")) { "메모리 주소 형태로 출력됨: $output" }
@@ -253,9 +272,9 @@ class KotlinRunnerTest {
                     return pq.remove()
                 }
             """.trimIndent(),
-            argsLiteral = "3",
+            argsJson = JSONArray().put(3),
         )
-        assertEquals("OK", result.getString("status"))
+        assertEquals("PASSED", result.getString("status"))
         assertEquals(5, result.getInt("output"))
     }
 

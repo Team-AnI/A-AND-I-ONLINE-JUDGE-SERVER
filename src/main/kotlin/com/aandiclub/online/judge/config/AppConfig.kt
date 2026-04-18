@@ -19,6 +19,7 @@ data class SandboxProperties(
     val memoryLimitMb: Int = 256,
     val cpuLimit: String = "1.0",
     val pidsLimit: Int = 50,
+    val caseConcurrency: Int = 4,
     val images: Map<String, String> = mapOf(
         "python" to "judge-sandbox-python:latest",
         "kotlin" to "judge-sandbox-kotlin:latest",

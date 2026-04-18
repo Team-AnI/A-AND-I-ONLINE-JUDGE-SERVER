@@ -87,6 +87,7 @@ judge:
     memory-limit-mb: ${SANDBOX_MEMORY_LIMIT_MB:256}
     cpu-limit: ${SANDBOX_CPU_LIMIT:1.0}
     pids-limit: ${SANDBOX_PIDS_LIMIT:50}
+    case-concurrency: ${SANDBOX_CASE_CONCURRENCY:4}
     images:
       python: ${SANDBOX_IMAGE_PYTHON:judge-sandbox-python:latest}
       kotlin: ${SANDBOX_IMAGE_KOTLIN:judge-sandbox-kotlin:latest}

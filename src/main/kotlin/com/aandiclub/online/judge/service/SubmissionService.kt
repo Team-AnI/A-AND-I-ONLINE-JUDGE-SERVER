@@ -44,6 +44,7 @@ class SubmissionService(
     private val redisTemplate: ReactiveStringRedisTemplate,
     private val listenerContainer: ReactiveRedisMessageListenerContainer,
     private val judgeWorker: JudgeWorker,
+    private val judgePerformanceMonitorService: JudgePerformanceMonitorService,
     private val judgeWorkerScope: CoroutineScope,
     private val judgeWorkerSemaphore: Semaphore,
     private val objectMapper: ObjectMapper,
@@ -93,6 +94,7 @@ class SubmissionService(
             code = request.code,
         )
         val saved = submissionRepository.save(submission).awaitSingle()
+        judgePerformanceMonitorService.onSubmissionAccepted(saved)
         SubmissionMdc.withSubmissionId(saved.id) {
             log.info("Submission created: language={}", saved.language)
         }
@@ -107,6 +109,7 @@ class SubmissionService(
                 runCatching { judgeWorker.execute(saved) }
                     .onFailure { ex ->
                         log.error("Judge worker failed", ex)
+                        judgePerformanceMonitorService.onSubmissionFailed(saved.id)
                         val errorPayload = objectMapper.writeValueAsString(
                             mapOf(
                                 "event" to "error",

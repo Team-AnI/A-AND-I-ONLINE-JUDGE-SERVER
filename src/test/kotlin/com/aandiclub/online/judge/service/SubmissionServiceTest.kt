@@ -48,6 +48,7 @@ class SubmissionServiceTest {
     private val redisTemplate = mockk<ReactiveStringRedisTemplate>()
     private val listenerContainer = mockk<ReactiveRedisMessageListenerContainer>()
     private val judgeWorker = mockk<JudgeWorker>(relaxed = true)
+    private val judgePerformanceMonitorService = mockk<JudgePerformanceMonitorService>(relaxed = true)
     private val judgeWorkerScope = CoroutineScope(Dispatchers.Unconfined + SupervisorJob())
     private val judgeWorkerSemaphore = Semaphore(2)
     private val objectMapper = ObjectMapper()
@@ -61,6 +62,7 @@ class SubmissionServiceTest {
         redisTemplate,
         listenerContainer,
         judgeWorker,
+        judgePerformanceMonitorService,
         judgeWorkerScope,
         judgeWorkerSemaphore,
         objectMapper,

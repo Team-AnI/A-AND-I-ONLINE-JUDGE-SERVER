@@ -37,7 +37,8 @@ class V2AdminAuthorizationFilter(
 
     private fun isTarget(exchange: ServerWebExchange): Boolean {
         if (exchange.request.method?.name() == "OPTIONS") return false
-        return exchange.request.path.pathWithinApplication().value().startsWith("/v2/admin/")
+        val path = exchange.request.path.pathWithinApplication().value()
+        return path.startsWith("/v2/admin/") || path == "/v2/monitor" || path.startsWith("/v2/monitor/")
     }
 
     companion object {
