@@ -100,25 +100,14 @@ def execute_single(code, args):
     return execute_solution(namespace, args)
 
 
-def run_case_subprocess(code_path, args, time_limit_ms, case_id):
+def run_case_subprocess(code_path, args, case_id):
     payload = json.dumps({"codePath": str(code_path), "args": args})
-    try:
-        proc = subprocess.run(
-            [sys.executable, __file__, "--child"],
-            input=payload,
-            capture_output=True,
-            text=True,
-            timeout=max(time_limit_ms / 1000.0, 0.1) + 0.1,
-        )
-    except subprocess.TimeoutExpired:
-        return build_case_result(
-            case_id=case_id,
-            status="TIME_LIMIT_EXCEEDED",
-            output=None,
-            error=f"TIME_LIMIT_EXCEEDED: execution exceeded {time_limit_ms}ms limit",
-            time_ms=float(time_limit_ms),
-            memory_mb=0.0,
-        )
+    proc = subprocess.run(
+        [sys.executable, __file__, "--child"],
+        input=payload,
+        capture_output=True,
+        text=True,
+    )
 
     stdout = (proc.stdout or "").strip()
     stderr = (proc.stderr or "").strip()
@@ -151,7 +140,7 @@ def run_case_subprocess(code_path, args, time_limit_ms, case_id):
     return result
 
 
-def execute_bulk(code, cases, time_limit_ms):
+def execute_bulk(code, cases):
     _, validation_error = validate_solution_code(code)
     if validation_error is not None:
         return {
@@ -175,7 +164,6 @@ def execute_bulk(code, cases, time_limit_ms):
             run_case_subprocess(
                 code_path=code_path,
                 args=case.get("args", []),
-                time_limit_ms=time_limit_ms,
                 case_id=case.get("caseId"),
             )
             for case in cases
@@ -219,8 +207,7 @@ def main():
     code = payload.get("code", "")
     if "cases" in payload:
         cases = payload.get("cases") or []
-        time_limit_ms = int(payload.get("timeLimitMs", 0) or 0)
-        print(json.dumps(execute_bulk(code, cases, time_limit_ms)))
+        print(json.dumps(execute_bulk(code, cases)))
         return
 
     args = payload.get("args", [])

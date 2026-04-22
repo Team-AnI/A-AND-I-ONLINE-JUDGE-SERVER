@@ -26,7 +26,7 @@
 ## v2.0.15
 
 - 측정 시각(UTC): `2026-04-18T13:43:59.795645+00:00`
-- iterations: `3` / warmups: `1` / timeLimitMs: `10000`
+- iterations: `3` / warmups: `1`
 
 ### python
 
@@ -55,7 +55,7 @@
 ## working-tree
 
 - 측정 시각(UTC): `2026-04-18T13:44:41.345600+00:00`
-- iterations: `3` / warmups: `1` / timeLimitMs: `10000`
+- iterations: `3` / warmups: `1`
 
 ### python
 

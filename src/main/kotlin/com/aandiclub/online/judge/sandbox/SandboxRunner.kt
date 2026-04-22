@@ -9,8 +9,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
 import java.util.UUID
-import java.util.concurrent.TimeUnit
-import kotlin.math.max
 
 data class SandboxInput(
     val code: String,
@@ -96,7 +94,6 @@ class SandboxRunner(
             mapOf(
                 "code" to code,
                 "cases" to testCases,
-                "timeLimitMs" to properties.timeLimitSeconds * 1_000L,
             )
         )
 
@@ -153,18 +150,7 @@ class SandboxRunner(
             }
         }.also { it.isDaemon = true; it.start() }
 
-        val perCaseLimitMs = properties.timeLimitSeconds * 1_000L
-        val totalLimitMs = perCaseLimitMs * max(1, testCases.size)
-        val timedOut = !process.waitFor(totalLimitMs + startupHeadroomMs(language), TimeUnit.MILLISECONDS)
-
-        if (timedOut) {
-            process.destroyForcibly()
-            stdoutThread.join(500)
-            stderrThread.join(500)
-            stdinThread.join(200)
-            log.warn("Container {} timed out after {}ms for {} cases", containerName, totalLimitMs, testCases.size)
-            return buildTimedOutBatchJson(testCases, perCaseLimitMs)
-        }
+        process.waitFor()
 
         stdoutThread.join(500)
         stderrThread.join(500)
@@ -270,20 +256,6 @@ class SandboxRunner(
         )
     }
 
-    private fun buildTimedOutBatchJson(testCases: List<SandboxCaseInput>, perCaseLimitMs: Long): String {
-        val results = testCases.map {
-            mapOf(
-                "caseId" to it.caseId,
-                "status" to TestCaseStatus.TIME_LIMIT_EXCEEDED.name,
-                "output" to null,
-                "error" to "TIME_LIMIT_EXCEEDED: execution exceeded ${perCaseLimitMs}ms limit",
-                "timeMs" to perCaseLimitMs.toDouble(),
-                "memoryMb" to 0.0,
-            )
-        }
-        return objectMapper.writeValueAsString(mapOf("results" to results))
-    }
-
     private fun resolveStatus(status: String?, error: String?): TestCaseStatus = when {
         status != null -> runCatching { TestCaseStatus.valueOf(status) }.getOrElse { inferStatus(error) }
         else -> inferStatus(error)
@@ -344,12 +316,6 @@ class SandboxRunner(
                 memoryMb = externalMemoryMb,
             )
         }
-    }
-
-    private fun startupHeadroomMs(language: Language): Long = when (language) {
-        Language.PYTHON -> 2_000L
-        Language.KOTLIN -> 16_000L
-        Language.DART -> 6_000L
     }
 
     private fun tmpfsMountOptions(language: Language): String = when (language) {

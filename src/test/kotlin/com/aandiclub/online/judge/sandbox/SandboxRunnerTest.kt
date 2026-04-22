@@ -15,7 +15,6 @@ import java.lang.reflect.Method
 class SandboxRunnerTest {
 
     private val properties = SandboxProperties(
-        timeLimitSeconds = 1,
         memoryLimitMb = 128,
         cpuLimit = "1.0",
         pidsLimit = 50,
@@ -32,7 +31,6 @@ class SandboxRunnerTest {
 
     @Test
     fun `sandbox properties are loaded correctly`() {
-        assertEquals(1, properties.timeLimitSeconds)
         assertEquals(128, properties.memoryLimitMb)
         assertEquals("1.0", properties.cpuLimit)
         assertEquals(50, properties.pidsLimit)
@@ -104,18 +102,6 @@ class SandboxRunnerTest {
         assertEquals(TestCaseStatus.PASSED, result.status)
         assertEquals(2, result.output)
         assertEquals(null, result.error)
-    }
-
-    @Test
-    fun `parseRunnerOutput recognizes explicit time limit status`() {
-        val result = parseRunnerOutput(
-            """{"status":"TIME_LIMIT_EXCEEDED","output":null,"error":"TIME_LIMIT_EXCEEDED: execution exceeded 1000ms limit","timeMs":1000.0,"memoryMb":0.0}""",
-            exitCode = 0,
-            language = Language.PYTHON,
-            externalMemoryMb = 0.0,
-        )
-
-        assertEquals(TestCaseStatus.TIME_LIMIT_EXCEEDED, result.status)
     }
 
     private fun parseRunnerOutput(

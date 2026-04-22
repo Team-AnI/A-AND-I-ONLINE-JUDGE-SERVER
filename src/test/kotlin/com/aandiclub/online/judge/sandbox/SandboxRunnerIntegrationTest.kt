@@ -14,7 +14,6 @@ class SandboxRunnerIntegrationTest {
 
     private val runner = SandboxRunner(
         properties = SandboxProperties(
-            timeLimitSeconds = 2,
             memoryLimitMb = 256,
             cpuLimit = "1.0",
             pidsLimit = 50,
@@ -212,31 +211,16 @@ class SandboxRunnerIntegrationTest {
     }
 
     @Test
-    fun `python infinite loop returns time limit exceeded`() {
-        val shortLimitRunner = SandboxRunner(
-            properties = SandboxProperties(
-                timeLimitSeconds = 1,
-                memoryLimitMb = 256,
-                cpuLimit = "1.0",
-                pidsLimit = 50,
-                images = mapOf("python" to "judge-sandbox-python:latest"),
-            ),
-            objectMapper = ObjectMapper(),
-            dockerStatsClient = DockerStatsClient(),
+    fun `python delayed solution passes without time limit`() {
+        val result = runBlockingRunner(
+            language = Language.PYTHON,
+            code = "import time\n\ndef solution(a, b):\n    time.sleep(1.2)\n    return a + b",
+            args = listOf(3, 5),
         )
 
-        val result = kotlinx.coroutines.runBlocking {
-            shortLimitRunner.run(
-                Language.PYTHON,
-                SandboxInput(
-                    code = "def solution(a, b):\n    while True:\n        pass",
-                    args = listOf(3, 5),
-                )
-            )
-        }
-
-        assertEquals(TestCaseStatus.TIME_LIMIT_EXCEEDED, result.status)
-        assertTrue(result.error?.contains("limit") == true)
+        assertEquals(TestCaseStatus.PASSED, result.status)
+        assertEquals(8, result.output)
+        assertEquals(null, result.error)
     }
 
     private fun runBlockingRunner(

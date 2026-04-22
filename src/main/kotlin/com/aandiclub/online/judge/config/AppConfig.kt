@@ -15,7 +15,6 @@ import java.time.Clock
 
 @ConfigurationProperties(prefix = "judge.sandbox")
 data class SandboxProperties(
-    val timeLimitSeconds: Int = 2,
     val memoryLimitMb: Int = 256,
     val cpuLimit: String = "1.0",
     val pidsLimit: Int = 50,

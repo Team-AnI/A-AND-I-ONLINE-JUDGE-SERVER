@@ -83,7 +83,6 @@ judge:
     domain-code: ${SERVICE_DOMAIN_CODE:5}
     instance-id: ${INSTANCE_ID:${HOSTNAME:unknown-instance}}
   sandbox:
-    time-limit-seconds: ${SANDBOX_TIME_LIMIT_SECONDS:2}
     memory-limit-mb: ${SANDBOX_MEMORY_LIMIT_MB:256}
     cpu-limit: ${SANDBOX_CPU_LIMIT:1.0}
     pids-limit: ${SANDBOX_PIDS_LIMIT:50}

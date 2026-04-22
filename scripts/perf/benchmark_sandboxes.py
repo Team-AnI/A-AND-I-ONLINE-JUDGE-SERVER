@@ -160,7 +160,7 @@ def build_image(source_dir: Path, language: SandboxLanguage, image_tag: str) -> 
         )
 
 
-def run_case(image_tag: str, language: SandboxLanguage, case: SandboxCase, time_limit_ms: int) -> dict[str, Any]:
+def run_case(image_tag: str, language: SandboxLanguage, case: SandboxCase) -> dict[str, Any]:
     payload = {
         "code": language.code,
         "args": case.args,
@@ -231,7 +231,6 @@ def benchmark_source(
     iterations: int,
     warmups: int,
     languages: list[SandboxLanguage],
-    time_limit_ms: int,
     skip_build: bool,
 ) -> dict[str, Any]:
     token = sanitized_token(label)
@@ -240,7 +239,6 @@ def benchmark_source(
         "measuredAt": datetime.now(timezone.utc).isoformat(),
         "iterations": iterations,
         "warmups": warmups,
-        "timeLimitMs": time_limit_ms,
         "languages": {},
     }
 
@@ -257,8 +255,8 @@ def benchmark_source(
             for case in language.cases:
                 try:
                     for _ in range(warmups):
-                        run_case(image_tag, language, case, time_limit_ms)
-                    samples = [run_case(image_tag, language, case, time_limit_ms) for _ in range(iterations)]
+                        run_case(image_tag, language, case)
+                    samples = [run_case(image_tag, language, case) for _ in range(iterations)]
                     lang_result["cases"][case.name] = {
                         "description": case.description,
                         "args": case.args,
@@ -290,7 +288,7 @@ def render_report_block(results: list[dict[str, Any]]) -> str:
         lines.append(f"## {label}")
         lines.append("")
         lines.append(f"- 측정 시각(UTC): `{result['measuredAt']}`")
-        lines.append(f"- iterations: `{result['iterations']}` / warmups: `{result['warmups']}` / timeLimitMs: `{result['timeLimitMs']}`")
+        lines.append(f"- iterations: `{result['iterations']}` / warmups: `{result['warmups']}`")
         lines.append("")
         for language_key, language_result in result["languages"].items():
             lines.append(f"### {language_key}")
@@ -400,7 +398,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--label", action="append", dest="labels", help="custom label matching --git-ref order.")
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)
-    parser.add_argument("--time-limit-ms", type=int, default=10_000)
     parser.add_argument("--report", default=str(DEFAULT_REPORT))
     parser.add_argument("--json-out", help="optional path to write raw JSON results")
     parser.add_argument("--replace", action="store_true", help="replace per-label sections instead of appending a combined block")
@@ -437,7 +434,6 @@ def main() -> int:
                 iterations=args.iterations,
                 warmups=args.warmups,
                 languages=selected_languages,
-                time_limit_ms=args.time_limit_ms,
                 skip_build=args.skip_build,
             )
             results.append(result)

@@ -86,7 +86,7 @@
       .start()
   ```
   - stdin에 JSON 주입 후 stdout 읽기 (코루틴 `Dispatchers.IO`)
-  - `withTimeoutOrNull` 으로 타임아웃 → `TIME_LIMIT_EXCEEDED`
+  - 채점 시간초과 제한 없음: 컨테이너 프로세스가 종료될 때까지 대기
   - exit code != 0 → `RUNTIME_ERROR`
   - stdout JSON 파싱 → `SandboxOutput` 반환
 
@@ -95,7 +95,7 @@
   - 각 언어 정상 실행 (`solution(3, 5) → 8`)
   - `RUNTIME_ERROR` 케이스 (ZeroDivisionError 등)
   - `COMPILE_ERROR` 케이스 (Kotlin/Dart 문법 오류)
-  - `TIME_LIMIT_EXCEEDED` 케이스 (무한루프, timeLimitSeconds=2)
+  - 시간초과 제한 없음: 지연 실행 케이스도 정상 완료
 
 ---
 

@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
-final _importDirectivePattern = RegExp(r"""^\s*import\s+(['"])([^'"]+)\1.*;\s*$""");
+final _importDirectivePattern =
+    RegExp(r"""^\s*import\s+(['"])([^'"]+)\1.*;\s*$""");
 
 class UserCodeParts {
   final List<String> imports;
@@ -19,7 +20,8 @@ class UserCodeParts {
 
 String _toLiteral(dynamic a) {
   if (a == null) return 'null';
-  if (a is String) return "'${a.replaceAll(r'\\', r'\\\\').replaceAll("'", r"\'")}'";
+  if (a is String)
+    return "'${a.replaceAll(r'\\', r'\\\\').replaceAll("'", r"\'")}'";
   if (a is List) return '[${a.map(_toLiteral).join(', ')}]';
   if (a is Map) {
     return '{${a.entries.map((e) => "${_toLiteral(e.key.toString())}: ${_toLiteral(e.value)}").join(', ')}}';
@@ -74,7 +76,9 @@ UserCodeParts splitUserCode(String code) {
         continue;
       }
 
-      if (trimmed.startsWith('library ') || trimmed.startsWith('part ') || trimmed.startsWith('export ')) {
+      if (trimmed.startsWith('library ') ||
+          trimmed.startsWith('part ') ||
+          trimmed.startsWith('export ')) {
         return UserCodeParts(
           imports: imports,
           body: code,
@@ -133,7 +137,8 @@ Map<String, dynamic> buildCaseResult({
 }
 
 String buildGeneratedProgram(UserCodeParts userCode) {
-  final importBlock = '${buildImportDirectives(userCode.imports).join('\n')}\n\n';
+  final importBlock =
+      '${buildImportDirectives(userCode.imports).join('\n')}\n\n';
   return importBlock +
       "Object? __judgeNormalizeJsonValue(Object? value) {\n" +
       "  if (value == null || value is num || value is bool || value is String) return value;\n" +
@@ -189,7 +194,8 @@ Future<double> _readRssMb(int pid) async {
     return 0.0;
   }
   final content = await statusFile.readAsString();
-  final match = RegExp(r'^VmRSS:\s+(\d+)\s+kB', multiLine: true).firstMatch(content);
+  final match =
+      RegExp(r'^VmRSS:\s+(\d+)\s+kB', multiLine: true).firstMatch(content);
   if (match == null) {
     return 0.0;
   }
@@ -213,7 +219,6 @@ Future<Map<String, dynamic>> runCompiledCase({
   required String snapshotPath,
   required List<dynamic> args,
   required int caseId,
-  required int timeLimitMs,
 }) async {
   final tmpDir = await Directory('/tmp').createTemp('judge_case_');
   try {
@@ -228,26 +233,13 @@ Future<Map<String, dynamic>> runCompiledCase({
     final exitCodeFuture = process.exitCode;
     final peakFuture = collectPeakRssMb(process.pid, exitCodeFuture);
 
-    try {
-      await exitCodeFuture.timeout(Duration(milliseconds: math.max(timeLimitMs, 1)));
-    } on TimeoutException {
-      process.kill(ProcessSignal.sigkill);
-      await exitCodeFuture.catchError((_) => -1);
-      final peakMb = await peakFuture;
-      return buildCaseResult(
-        caseId: caseId,
-        status: 'TIME_LIMIT_EXCEEDED',
-        output: null,
-        error: 'TIME_LIMIT_EXCEEDED: execution exceeded ${timeLimitMs}ms limit',
-        timeMs: timeLimitMs.toDouble(),
-        memoryMb: peakMb,
-      );
-    }
+    await exitCodeFuture;
 
     final stderr = await process.stderr.transform(utf8.decoder).join();
     final peakMb = await peakFuture;
     if (!resultFile.existsSync()) {
-      final message = stderr.trim().isNotEmpty ? stderr.trim() : 'child produced no result';
+      final message =
+          stderr.trim().isNotEmpty ? stderr.trim() : 'child produced no result';
       return buildCaseResult(
         caseId: caseId,
         status: 'RUNTIME_ERROR',
@@ -258,16 +250,19 @@ Future<Map<String, dynamic>> runCompiledCase({
       );
     }
 
-    final payload = jsonDecode(await resultFile.readAsString()) as Map<String, dynamic>;
+    final payload =
+        jsonDecode(await resultFile.readAsString()) as Map<String, dynamic>;
     payload['caseId'] = caseId;
-    payload['memoryMb'] = math.max((payload['memoryMb'] as num?)?.toDouble() ?? 0.0, peakMb);
+    payload['memoryMb'] =
+        math.max((payload['memoryMb'] as num?)?.toDouble() ?? 0.0, peakMb);
     return payload;
   } finally {
     await tmpDir.delete(recursive: true);
   }
 }
 
-Future<Map<String, dynamic>> executeBulk(String code, List<dynamic> cases, int timeLimitMs) async {
+Future<Map<String, dynamic>> executeBulk(
+    String code, List<dynamic> cases) async {
   final userCode = splitUserCode(code);
   if (userCode.error != null) {
     return {
@@ -288,7 +283,8 @@ Future<Map<String, dynamic>> executeBulk(String code, List<dynamic> cases, int t
     final snapshotFile = File('${tmpDir.path}/solution.jit');
     await sourceFile.writeAsString(buildGeneratedProgram(userCode));
 
-    final compileError = await compileSnapshot(sourceFile.path, snapshotFile.path);
+    final compileError =
+        await compileSnapshot(sourceFile.path, snapshotFile.path);
     if (compileError != null) {
       return {
         'results': cases
@@ -309,7 +305,6 @@ Future<Map<String, dynamic>> executeBulk(String code, List<dynamic> cases, int t
           snapshotPath: snapshotFile.path,
           args: (caseItem['args'] as List<dynamic>? ?? const <dynamic>[]),
           caseId: caseItem['caseId'] as int,
-          timeLimitMs: timeLimitMs,
         ),
       );
     }
@@ -324,7 +319,9 @@ Future<void> main() async {
   try {
     raw = await stdin.transform(utf8.decoder).join();
   } catch (e) {
-    print(jsonEncode(buildCaseResult(status: 'INTERNAL_ERROR', error: 'INTERNAL_ERROR: failed to read stdin: $e')));
+    print(jsonEncode(buildCaseResult(
+        status: 'INTERNAL_ERROR',
+        error: 'INTERNAL_ERROR: failed to read stdin: $e')));
     exit(1);
   }
 
@@ -332,7 +329,9 @@ Future<void> main() async {
   try {
     payload = jsonDecode(raw) as Map<String, dynamic>;
   } catch (e) {
-    print(jsonEncode(buildCaseResult(status: 'INTERNAL_ERROR', error: 'INTERNAL_ERROR: failed to parse input: $e')));
+    print(jsonEncode(buildCaseResult(
+        status: 'INTERNAL_ERROR',
+        error: 'INTERNAL_ERROR: failed to parse input: $e')));
     exit(1);
   }
 
@@ -341,7 +340,6 @@ Future<void> main() async {
     final results = await executeBulk(
       code,
       (payload['cases'] as List<dynamic>? ?? const <dynamic>[]),
-      ((payload['timeLimitMs'] as num?)?.toInt() ?? 0),
     );
     print(jsonEncode(results));
     return;
@@ -355,7 +353,6 @@ Future<void> main() async {
         'args': (payload['args'] as List<dynamic>? ?? const <dynamic>[]),
       }
     ],
-    2000,
   );
   final first = (singleResult['results'] as List).first as Map<String, dynamic>;
   first.remove('caseId');
