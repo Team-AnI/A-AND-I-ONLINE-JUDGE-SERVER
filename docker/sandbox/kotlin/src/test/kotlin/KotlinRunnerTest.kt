@@ -44,6 +44,20 @@ fun judgeToJsonLiteral(value: Any?): String {
 
 class KotlinRunnerTest {
 
+    @Test fun `buildCompileFailureDetail includes placeholder for empty compiler output`() {
+        val detail = buildCompileFailureDetail(
+            compileExit = 1,
+            compileOut = "",
+            sourceChars = 1234,
+            caseCount = 2,
+        )
+
+        assert(detail.contains("exit=1"))
+        assert(detail.contains("sourceChars=1234"))
+        assert(detail.contains("caseCount=2"))
+        assert(detail.contains("detail=<empty compiler output>"))
+    }
+
     // ── buildArgsLiteral: 스칼라 타입 ─────────────────────────────────────
 
     @Test fun `buildArgsLiteral handles scalar int args`() {

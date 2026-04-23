@@ -108,16 +108,21 @@ class SandboxRunner(
         testCases: List<SandboxCaseInput>,
     ): String {
         val containerName = "judge-${UUID.randomUUID().toString().take(12)}"
+        val memoryLimitMb = when (language) {
+            Language.KOTLIN -> properties.kotlinMemoryLimitMb
+            else -> properties.memoryLimitMb
+        }
         val cmd = listOf(
             "docker", "run", "--rm",
             "--name", containerName,
             "--network", "none",
             "--cpus", properties.cpuLimit,
-            "--memory", "${properties.memoryLimitMb}m",
+            "--memory", "${memoryLimitMb}m",
             "--read-only",
             "--security-opt", "no-new-privileges",
             "--pids-limit", "${properties.pidsLimit}",
             "--tmpfs", tmpfsMountOptions(language),
+        ) + kotlinCompileEnvArgs(language) + listOf(
             "-i", image,
         )
 
@@ -168,11 +173,26 @@ class SandboxRunner(
             stderrOutput.length,
         )
 
+        if (stderrOutput.isNotBlank()) {
+            log.warn("Container {} stderr: {}", containerName, stderrOutput.take(4_000))
+        }
+
         if (rawOutput.isBlank() && stderrOutput.isNotBlank()) {
             log.warn("Container {} produced blank stdout. stderr={}", containerName, stderrOutput)
         }
 
         return rawOutput
+    }
+
+    private fun kotlinCompileEnvArgs(language: Language): List<String> {
+        if (language != Language.KOTLIN) {
+            return emptyList()
+        }
+
+        return listOf(
+            "-e", "KOTLIN_COMPILE_XMS_MB=${properties.kotlinCompileJvmMinMb}",
+            "-e", "KOTLIN_COMPILE_XMX_MB=${properties.kotlinCompileJvmMaxMb}",
+        )
     }
 
     private fun parseRunnerBatchOutput(
@@ -246,6 +266,13 @@ class SandboxRunner(
     private fun parseCaseOutput(caseId: Int, map: Map<*, *>): SandboxCaseOutput {
         val error = map["error"] as? String
         val status = resolveStatus(map["status"] as? String, error)
+        if (status == TestCaseStatus.COMPILE_ERROR) {
+            if (error.isNullOrBlank() || error == "COMPILE_ERROR: ") {
+                log.error("Compile error for caseId={} arrived without detail. payload={}", caseId, map)
+            } else {
+                log.warn("Compile error for caseId={}: {}", caseId, error)
+            }
+        }
         return SandboxCaseOutput(
             caseId = caseId,
             status = status,

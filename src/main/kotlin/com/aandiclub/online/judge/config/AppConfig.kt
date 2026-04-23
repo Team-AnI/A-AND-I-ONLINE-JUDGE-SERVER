@@ -16,6 +16,9 @@ import java.time.Clock
 @ConfigurationProperties(prefix = "judge.sandbox")
 data class SandboxProperties(
     val memoryLimitMb: Int = 256,
+    val kotlinMemoryLimitMb: Int = 768,
+    val kotlinCompileJvmMinMb: Int = 64,
+    val kotlinCompileJvmMaxMb: Int = 512,
     val cpuLimit: String = "1.0",
     val pidsLimit: Int = 50,
     val caseConcurrency: Int = 4,

@@ -84,6 +84,9 @@ judge:
     instance-id: ${INSTANCE_ID:${HOSTNAME:unknown-instance}}
   sandbox:
     memory-limit-mb: ${SANDBOX_MEMORY_LIMIT_MB:256}
+    kotlin-memory-limit-mb: ${SANDBOX_MEMORY_LIMIT_KOTLIN_MB:768}
+    kotlin-compile-jvm-min-mb: ${SANDBOX_KOTLIN_COMPILE_JVM_MIN_MB:64}
+    kotlin-compile-jvm-max-mb: ${SANDBOX_KOTLIN_COMPILE_JVM_MAX_MB:512}
     cpu-limit: ${SANDBOX_CPU_LIMIT:1.0}
     pids-limit: ${SANDBOX_PIDS_LIMIT:50}
     case-concurrency: ${SANDBOX_CASE_CONCURRENCY:4}
