@@ -37,6 +37,28 @@ void main() {
     test('handles string with special characters', () {
       expect(toArgsLiteral(["it's"]), equals(r"'it\'s'"));
     });
+
+    test('escapes newlines so multiline strings stay single source line', () {
+      expect(toArgsLiteral(['line1\nline2']), equals(r"'line1\nline2'"));
+    });
+
+    test('escapes carriage return and tab', () {
+      expect(toArgsLiteral(['a\rb\tc']), equals(r"'a\rb\tc'"));
+    });
+
+    test('escapes dollar sign so it is not a Dart interpolation', () {
+      expect(toArgsLiteral([r'$foo']), equals(r"'\$foo'"));
+    });
+
+    test('escapes other control characters using unicode escape', () {
+      expect(toArgsLiteral(['\u0001\u007f']), equals(r"'\u{1}\u{7f}'"));
+    });
+
+    test('handles ANI Language style multiline program input', () {
+      const input = 'FUNC ADD A B\nDO\nRETURN A + B\nEND\nFUNC MAIN\nDO\nPRINT A\nEND';
+      const expected = r"'FUNC ADD A B\nDO\nRETURN A + B\nEND\nFUNC MAIN\nDO\nPRINT A\nEND'";
+      expect(toArgsLiteral([input]), equals(expected));
+    });
   });
 
   // ── toArgsLiteral: 리스트 타입 ──────────────────────────────────────────

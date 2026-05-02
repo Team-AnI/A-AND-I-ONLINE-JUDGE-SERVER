@@ -121,7 +121,7 @@ fun buildArgsLiteral(argsJson: JSONArray): String =
 
 fun toLiteral(value: Any?): String = when (value) {
     null, JSONObject.NULL -> "null"
-    is String -> "\"${value.replace("\\", "\\\\").replace("\"", "\\\"") }\""
+    is String -> kotlinStringLiteral(value)
     is Number, is Boolean -> value.toString()
     is JSONArray -> {
         val elements = (0 until value.length()).joinToString(", ") { toLiteral(value.get(it)) }
@@ -129,13 +129,34 @@ fun toLiteral(value: Any?): String = when (value) {
     }
     is JSONObject -> {
         val entries = value.keys().asSequence().joinToString(", ") { key ->
-            val k = "\"${key.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+            val k = kotlinStringLiteral(key)
             val v = toLiteral(value.get(key))
             "$k to $v"
         }
         "mapOf($entries)"
     }
     else -> value.toString()
+}
+
+fun kotlinStringLiteral(value: String): String = buildString {
+    append('"')
+    for (ch in value) {
+        when (ch) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '$' -> append("\\$")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            '\b' -> append("\\b")
+            else -> if (ch.code < 0x20 || ch.code == 0x7F) {
+                append("\\u%04x".format(ch.code))
+            } else {
+                append(ch)
+            }
+        }
+    }
+    append('"')
 }
 
 fun prepareKotlinSource(code: String): PreparedKotlinSource {
