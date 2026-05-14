@@ -6,6 +6,9 @@ private const val KOTLIN_LIB_CLASSPATH = "/opt/kotlinc/lib/*"
 private const val RUNNER_CLASSPATH = "/app/lib/org.json.jar:$KOTLIN_LIB_CLASSPATH"
 private const val GENERATED_SOURCE_CLASSPATH = "/app/lib/org.json.jar"
 private val KOTLIN_IMPORT_DIRECTIVE = Regex("""^\s*import\s+.+$""")
+private val COMPILE_XMS_MB = System.getenv("KOTLIN_COMPILE_XMS_MB")?.toIntOrNull()?.coerceAtLeast(32) ?: 64
+private val COMPILE_XMX_MB = System.getenv("KOTLIN_COMPILE_XMX_MB")?.toIntOrNull()?.coerceAtLeast(COMPILE_XMS_MB) ?: 512
+private const val MAX_COMPILE_DETAIL_CHARS = 4_000
 
 data class PreparedKotlinSource(
     val imports: List<String>,
@@ -64,8 +67,8 @@ fun executeBatch(code: String, casesJson: JSONArray): JSONObject {
 
         val compileProc = ProcessBuilder(
             "java",
-            "-Xms32m",
-            "-Xmx128m",
+            "-Xms${COMPILE_XMS_MB}m",
+            "-Xmx${COMPILE_XMX_MB}m",
             "-cp", RUNNER_CLASSPATH,
             "org.jetbrains.kotlin.cli.jvm.K2JVMCompiler",
             "-classpath", GENERATED_SOURCE_CLASSPATH,
@@ -76,7 +79,14 @@ fun executeBatch(code: String, casesJson: JSONArray): JSONObject {
         val compileOut = compileProc.inputStream.bufferedReader().readText()
         val compileExit = compileProc.waitFor()
         if (compileExit != 0) {
-            return buildBatchErrorJson(casesJson, "COMPILE_ERROR: ${compileOut.sanitizeForJson()}")
+            val detail = buildCompileFailureDetail(
+                compileExit = compileExit,
+                compileOut = compileOut,
+                sourceChars = sourceFile.length(),
+                caseCount = casesJson.length(),
+            )
+            System.err.println("KOTLIN_COMPILE_ERROR $detail")
+            return buildBatchErrorJson(casesJson, "COMPILE_ERROR: $detail")
         }
 
         val runProc = ProcessBuilder(
@@ -111,7 +121,7 @@ fun buildArgsLiteral(argsJson: JSONArray): String =
 
 fun toLiteral(value: Any?): String = when (value) {
     null, JSONObject.NULL -> "null"
-    is String -> "\"${value.replace("\\", "\\\\").replace("\"", "\\\"") }\""
+    is String -> kotlinStringLiteral(value)
     is Number, is Boolean -> value.toString()
     is JSONArray -> {
         val elements = (0 until value.length()).joinToString(", ") { toLiteral(value.get(it)) }
@@ -119,13 +129,34 @@ fun toLiteral(value: Any?): String = when (value) {
     }
     is JSONObject -> {
         val entries = value.keys().asSequence().joinToString(", ") { key ->
-            val k = "\"${key.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+            val k = kotlinStringLiteral(key)
             val v = toLiteral(value.get(key))
             "$k to $v"
         }
         "mapOf($entries)"
     }
     else -> value.toString()
+}
+
+fun kotlinStringLiteral(value: String): String = buildString {
+    append('"')
+    for (ch in value) {
+        when (ch) {
+            '\\' -> append("\\\\")
+            '"' -> append("\\\"")
+            '$' -> append("\\$")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            '\b' -> append("\\b")
+            else -> if (ch.code < 0x20 || ch.code == 0x7F) {
+                append("\\u%04x".format(ch.code))
+            } else {
+                append(ch)
+            }
+        }
+    }
+    append('"')
 }
 
 fun prepareKotlinSource(code: String): PreparedKotlinSource {
@@ -302,6 +333,20 @@ fun buildSingleErrorJson(error: String, timeMs: Double): String =
         .put("timeMs", timeMs)
         .put("memoryMb", 0.0)
         .toString()
+
+fun buildCompileFailureDetail(
+    compileExit: Int,
+    compileOut: String,
+    sourceChars: Long,
+    caseCount: Int,
+): String {
+    val normalized = compileOut
+        .sanitizeForJson()
+        .ifBlank { "<empty compiler output>" }
+        .let { if (it.length > MAX_COMPILE_DETAIL_CHARS) it.take(MAX_COMPILE_DETAIL_CHARS) + "...<truncated>" else it }
+
+    return "exit=$compileExit sourceChars=$sourceChars caseCount=$caseCount xmsMb=$COMPILE_XMS_MB xmxMb=$COMPILE_XMX_MB detail=$normalized"
+}
 
 fun String.sanitizeForJson(): String = replace("\\", "\\\\")
     .replace("\"", "\\\"")

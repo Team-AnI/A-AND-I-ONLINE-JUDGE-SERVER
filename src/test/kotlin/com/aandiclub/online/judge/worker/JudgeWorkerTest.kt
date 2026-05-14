@@ -1,5 +1,6 @@
 package com.aandiclub.online.judge.worker
 
+import com.aandiclub.online.judge.api.v2.support.V2ErrorCode
 import com.aandiclub.online.judge.config.ProblemCatalogProperties
 import com.aandiclub.online.judge.config.ProblemItem
 import com.aandiclub.online.judge.config.SandboxProperties
@@ -9,10 +10,13 @@ import com.aandiclub.online.judge.domain.Submission
 import com.aandiclub.online.judge.domain.SubmissionStatus
 import com.aandiclub.online.judge.domain.TestCase
 import com.aandiclub.online.judge.domain.TestCaseStatus
+import com.aandiclub.online.judge.logging.api.JudgeEventLogger
+import com.aandiclub.online.judge.logging.api.JudgeEventType
 import com.aandiclub.online.judge.repository.ProblemRepository
 import com.aandiclub.online.judge.repository.SubmissionRepository
 import com.aandiclub.online.judge.sandbox.SandboxCaseInput
 import com.aandiclub.online.judge.sandbox.SandboxCaseOutput
+import com.aandiclub.online.judge.sandbox.SandboxExecutionException
 import com.aandiclub.online.judge.sandbox.SandboxRunner
 import com.aandiclub.online.judge.service.JudgePerformanceMonitorService
 import com.aandiclub.online.judge.service.SubmissionEventPublisher
@@ -28,6 +32,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.data.redis.core.ReactiveStringRedisTemplate
 import reactor.core.publisher.Mono
 import tools.jackson.databind.ObjectMapper
+import kotlin.test.assertFailsWith
 
 class JudgeWorkerTest {
     private val sandboxRunner = mockk<SandboxRunner>()
@@ -38,6 +43,7 @@ class JudgeWorkerTest {
     private val sandboxProperties = SandboxProperties(memoryLimitMb = 128)
     private val submissionEventPublisher = mockk<SubmissionEventPublisher>(relaxed = true)
     private val judgePerformanceMonitorService = mockk<JudgePerformanceMonitorService>(relaxed = true)
+    private val judgeEventLogger = mockk<JudgeEventLogger>(relaxed = true)
     private val problemCatalogProperties = ProblemCatalogProperties(
         items = mapOf(
             "quiz-101" to ProblemItem(
@@ -56,6 +62,19 @@ class JudgeWorkerTest {
         problemCatalogProperties = problemCatalogProperties,
         judgePerformanceMonitorService = judgePerformanceMonitorService,
         submissionEventPublisher = submissionEventPublisher,
+    )
+
+    private val judgeWorkerWithEventLogger = JudgeWorker(
+        sandboxRunner = sandboxRunner,
+        submissionRepository = submissionRepository,
+        redisTemplate = redisTemplate,
+        objectMapper = objectMapper,
+        sandboxProperties = sandboxProperties,
+        problemRepository = problemRepository,
+        problemCatalogProperties = problemCatalogProperties,
+        judgePerformanceMonitorService = judgePerformanceMonitorService,
+        submissionEventPublisher = submissionEventPublisher,
+        judgeEventLogger = judgeEventLogger,
     )
 
     init {
@@ -183,6 +202,115 @@ class JudgeWorkerTest {
                 "submission:sub-3",
                 match { it.contains("\"event\":\"done\"") && it.contains("\"overallStatus\":\"RUNTIME_ERROR\"") },
             )
+        }
+    }
+
+    @Test
+    fun `execute propagates sandbox infrastructure failure without saving user runtime error`() = runTest {
+        val submission = Submission(
+            id = "sub-infra",
+            submitterId = "user-1",
+            submitterPublicCode = "A00123",
+            problemId = "quiz-101",
+            language = Language.PYTHON,
+            code = "def solution(a,b): return a+b",
+        )
+        val testCases = listOf(TestCase(caseId = 1, args = listOf(3, 5), expectedOutput = 8))
+        val failure = SandboxExecutionException(
+            errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+            message = "docker failed",
+        )
+        coEvery { sandboxRunner.runCase(Language.PYTHON, submission.code, any()) } throws failure
+        every { submissionRepository.save(any()) } answers { Mono.just(firstArg()) }
+
+        val ex = assertFailsWith<SandboxExecutionException> {
+            judgeWorkerWithEventLogger.execute(submission, testCases, traceId = "trace-1")
+        }
+
+        assertEquals(V2ErrorCode.SANDBOX_EXECUTION_FAILED, ex.errorCode)
+        assertEquals(SubmissionStatus.RUNNING, submission.status)
+        assertEquals(0, submission.testCaseResults.size)
+        verify(exactly = 1) {
+            judgeEventLogger.eventError(
+                eventType = JudgeEventType.JUDGE_COMPLETED,
+                errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                throwable = failure,
+                traceId = "trace-1",
+                resourceId = "sub-infra",
+                metadata = match { it["caseId"] == 1 },
+            )
+        }
+        verify(exactly = 0) {
+            redisTemplate.convertAndSend(
+                "submission:sub-infra",
+                match { it.contains("\"overallStatus\":\"RUNTIME_ERROR\"") },
+            )
+        }
+    }
+
+    @Test
+    fun `execute maps sandbox timeout to timeout event error`() = runTest {
+        val submission = Submission(
+            id = "sub-timeout",
+            submitterId = "user-1",
+            submitterPublicCode = "A00123",
+            problemId = "quiz-101",
+            language = Language.PYTHON,
+            code = "def solution(a,b): return a+b",
+        )
+        val testCases = listOf(TestCase(caseId = 1, args = listOf(3, 5), expectedOutput = 8))
+        val failure = SandboxExecutionException(
+            errorCode = V2ErrorCode.SANDBOX_EXECUTION_TIMEOUT,
+            message = "sandbox timed out",
+        )
+        coEvery { sandboxRunner.runCase(Language.PYTHON, submission.code, any()) } throws failure
+        every { submissionRepository.save(any()) } answers { Mono.just(firstArg()) }
+
+        assertFailsWith<SandboxExecutionException> {
+            judgeWorkerWithEventLogger.execute(submission, testCases, traceId = "trace-timeout")
+        }
+
+        verify {
+            judgeEventLogger.eventError(
+                eventType = JudgeEventType.JUDGE_COMPLETED,
+                errorCode = V2ErrorCode.SANDBOX_EXECUTION_TIMEOUT,
+                throwable = failure,
+                traceId = "trace-timeout",
+                resourceId = "sub-timeout",
+                metadata = any(),
+            )
+        }
+    }
+
+    @Test
+    fun `execute keeps user runtime error as result without event error`() = runTest {
+        val submission = Submission(
+            id = "sub-user-runtime",
+            submitterId = "user-1",
+            submitterPublicCode = "A00123",
+            problemId = "quiz-101",
+            language = Language.PYTHON,
+            code = "def solution(a,b): return a // 0",
+        )
+        val testCases = listOf(TestCase(caseId = 1, args = listOf(3, 5), expectedOutput = 8))
+        coEvery { sandboxRunner.runCase(Language.PYTHON, submission.code, any()) } returns
+            SandboxCaseOutput(
+                caseId = 1,
+                status = TestCaseStatus.RUNTIME_ERROR,
+                output = null,
+                error = "RUNTIME_ERROR: division by zero",
+                timeMs = 1.0,
+                memoryMb = 2.0,
+            )
+        every { submissionRepository.save(any()) } answers { Mono.just(firstArg()) }
+        every { redisTemplate.convertAndSend(any(), any()) } returns Mono.just(1L)
+
+        judgeWorkerWithEventLogger.execute(submission, testCases, traceId = "trace-user-runtime")
+
+        assertEquals(SubmissionStatus.RUNTIME_ERROR, submission.status)
+        assertEquals(TestCaseStatus.RUNTIME_ERROR, submission.testCaseResults.first().status)
+        verify(exactly = 0) {
+            judgeEventLogger.eventError(any(), any(), any(), any(), any(), any())
         }
     }
 

@@ -1,8 +1,11 @@
 package com.aandiclub.online.judge.service
 
+import com.aandiclub.online.judge.api.v2.support.V2ErrorCode
 import com.aandiclub.online.judge.domain.Problem
 import com.aandiclub.online.judge.domain.ProblemMetadata
 import com.aandiclub.online.judge.domain.TestCase
+import com.aandiclub.online.judge.logging.api.JudgeEventLogger
+import com.aandiclub.online.judge.logging.api.JudgeEventType
 import com.aandiclub.online.judge.repository.ProblemRepository
 import kotlinx.coroutines.reactor.awaitSingle
 import org.slf4j.LoggerFactory
@@ -22,6 +25,7 @@ class ProblemEventSyncService(
     private val problemRepository: ProblemRepository,
     private val objectMapper: ObjectMapper,
     private val testCaseEventPublisher: TestCaseEventPublisher?,
+    private val judgeEventLogger: JudgeEventLogger? = null,
 ) {
     private val log = LoggerFactory.getLogger(ProblemEventSyncService::class.java)
 
@@ -70,15 +74,37 @@ class ProblemEventSyncService(
 
         val metadata = extractMetadata(payload)
 
-        problemRepository.save(
-            Problem(
-                problemId = problemId,
-                testCases = testCases,
-                metadata = metadata,
+        try {
+            problemRepository.save(
+                Problem(
+                    problemId = problemId,
+                    testCases = testCases,
+                    metadata = metadata,
+                )
+            ).awaitSingle()
+        } catch (ex: Exception) {
+            judgeEventLogger?.eventError(
+                eventType = JudgeEventType.TESTCASE_UPDATED,
+                errorCode = V2ErrorCode.TESTCASE_UPDATE_FAILED,
+                throwable = ex,
+                resourceId = problemId,
+                metadata = mapOf(
+                    "problemId" to problemId,
+                    "testCaseCount" to testCases.size,
+                ),
             )
-        ).awaitSingle()
+            throw ex
+        }
 
         log.info("Problem test cases upserted: problemId={}, cases={}", problemId, testCases.size)
+        judgeEventLogger?.event(
+            eventType = JudgeEventType.TESTCASE_UPDATED,
+            resourceId = problemId,
+            metadata = mapOf(
+                "problemId" to problemId,
+                "testCaseCount" to testCases.size,
+            ),
+        )
 
         testCaseEventPublisher?.publishTestCaseUpdated(problemId, testCases.size)
 

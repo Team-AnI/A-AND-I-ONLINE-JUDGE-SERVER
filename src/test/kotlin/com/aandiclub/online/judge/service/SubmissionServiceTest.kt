@@ -381,9 +381,8 @@ class SubmissionServiceTest {
             code = "print(1)",
         )
         val payload = """{"caseId":1,"status":"PASSED"}"""
-        val redisMessage = mockk<ReactiveSubscription.Message<String, String>>()
+        val redisMessage = redisMessage("submission:$submissionId", payload)
         every { submissionRepository.findById(submissionId) } returns Mono.just(submission)
-        every { redisMessage.message } returns payload
         every { listenerContainer.receive(ChannelTopic.of("submission:$submissionId")) } returns Flux.just(redisMessage)
 
         val events = service.streamResults(submissionId, "user-1", isAdmin = false).toList()
@@ -408,9 +407,8 @@ class SubmissionServiceTest {
             code = "print(1)",
         )
         val payload = """{"caseId":3,"status":"TIME_LIMIT_EXCEEDED","timeMs":2001.0,"memoryMb":24.7,"output":"x","error":"timeout"}"""
-        val redisMessage = mockk<ReactiveSubscription.Message<String, String>>()
+        val redisMessage = redisMessage("submission:$submissionId", payload)
         every { submissionRepository.findById(submissionId) } returns Mono.just(submission)
-        every { redisMessage.message } returns payload
         every { listenerContainer.receive(ChannelTopic.of("submission:$submissionId")) } returns Flux.just(redisMessage)
 
         val events = service.streamResults(submissionId, "user-1", isAdmin = false).toList()
@@ -493,4 +491,10 @@ class SubmissionServiceTest {
         verify(exactly = 1) { valueOps.set(any(), eq("new-uuid"), any<java.time.Duration>()) }
         coVerify(timeout = 1_000, exactly = 1) { judgeWorker.execute(match { it.id == "new-uuid" }) }
     }
+    private fun redisMessage(channel: String, payload: String): ReactiveSubscription.Message<String, String> =
+        object : ReactiveSubscription.Message<String, String> {
+            override fun getChannel(): String = channel
+
+            override fun getMessage(): String = payload
+        }
 }

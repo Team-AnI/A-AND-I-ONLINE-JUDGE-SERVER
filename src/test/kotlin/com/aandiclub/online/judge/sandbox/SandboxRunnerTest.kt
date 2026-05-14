@@ -1,5 +1,6 @@
 package com.aandiclub.online.judge.sandbox
 
+import com.aandiclub.online.judge.api.v2.support.V2ErrorCode
 import com.aandiclub.online.judge.config.SandboxProperties
 import com.aandiclub.online.judge.domain.Language
 import com.aandiclub.online.judge.domain.TestCaseStatus
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import tools.jackson.databind.ObjectMapper
+import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 
 class SandboxRunnerTest {
@@ -48,10 +50,11 @@ class SandboxRunnerTest {
         )
         val input = SandboxInput(code = "def solution(): pass", args = emptyList())
 
-        val ex = assertThrows<IllegalStateException> {
+        val ex = assertThrows<SandboxExecutionException> {
             emptyRunner.run(Language.PYTHON, input)
         }
         assert(ex.message!!.contains("PYTHON"))
+        assertEquals(V2ErrorCode.JUDGE_WORKER_UNAVAILABLE, ex.errorCode)
     }
 
     @Test
@@ -104,6 +107,59 @@ class SandboxRunnerTest {
         assertEquals(null, result.error)
     }
 
+    @Test
+    fun `parseRunnerOutput throws sandbox failure for invalid stdout`() {
+        val ex = assertThrows<SandboxExecutionException> {
+            parseRunnerOutput(
+                "not-json",
+                exitCode = 0,
+                language = Language.PYTHON,
+                externalMemoryMb = 0.0,
+            )
+        }
+
+        assertEquals(V2ErrorCode.SANDBOX_EXECUTION_FAILED, ex.errorCode)
+    }
+
+    @Test
+    fun `parseRunnerBatchOutput throws sandbox failure for blank stdout`() {
+        val ex = assertThrows<SandboxExecutionException> {
+            parseRunnerBatchOutput(
+                rawOutput = "",
+                language = Language.PYTHON,
+                testCases = listOf(SandboxCaseInput(caseId = 1, args = listOf(1))),
+            )
+        }
+
+        assertEquals(V2ErrorCode.SANDBOX_EXECUTION_FAILED, ex.errorCode)
+    }
+
+    @Test
+    fun `parseRunnerBatchOutput throws sandbox failure for broken protocol`() {
+        val ex = assertThrows<SandboxExecutionException> {
+            parseRunnerBatchOutput(
+                rawOutput = """{"ok":true}""",
+                language = Language.PYTHON,
+                testCases = listOf(SandboxCaseInput(caseId = 1, args = listOf(1))),
+            )
+        }
+
+        assertEquals(V2ErrorCode.SANDBOX_EXECUTION_FAILED, ex.errorCode)
+    }
+
+    @Test
+    fun `parseRunnerBatchOutput throws sandbox failure for unknown status without user error`() {
+        val ex = assertThrows<SandboxExecutionException> {
+            parseRunnerBatchOutput(
+                rawOutput = """{"results":[{"caseId":1,"status":"BROKEN","output":null,"error":null}]}""",
+                language = Language.PYTHON,
+                testCases = listOf(SandboxCaseInput(caseId = 1, args = listOf(1))),
+            )
+        }
+
+        assertEquals(V2ErrorCode.SANDBOX_EXECUTION_FAILED, ex.errorCode)
+    }
+
     private fun parseRunnerOutput(
         rawOutput: String,
         exitCode: Int,
@@ -118,6 +174,30 @@ class SandboxRunnerTest {
             Double::class.javaPrimitiveType,
         )
         method.isAccessible = true
-        return method.invoke(runner, rawOutput, exitCode, language, externalMemoryMb) as SandboxOutput
+        return invokePrivate(method, runner, rawOutput, exitCode, language, externalMemoryMb) as SandboxOutput
+    }
+
+    private fun parseRunnerBatchOutput(
+        rawOutput: String,
+        language: Language,
+        testCases: List<SandboxCaseInput>,
+    ): List<SandboxCaseOutput> {
+        val method: Method = SandboxRunner::class.java.getDeclaredMethod(
+            "parseRunnerBatchOutput",
+            String::class.java,
+            Language::class.java,
+            List::class.java,
+        )
+        method.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        return invokePrivate(method, runner, rawOutput, language, testCases) as List<SandboxCaseOutput>
+    }
+
+    private fun invokePrivate(method: Method, target: Any, vararg args: Any?): Any? {
+        try {
+            return method.invoke(target, *args)
+        } catch (ex: InvocationTargetException) {
+            throw ex.targetException
+        }
     }
 }

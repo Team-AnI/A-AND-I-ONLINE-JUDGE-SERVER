@@ -20,13 +20,49 @@ class UserCodeParts {
 
 String _toLiteral(dynamic a) {
   if (a == null) return 'null';
-  if (a is String)
-    return "'${a.replaceAll(r'\\', r'\\\\').replaceAll("'", r"\'")}'";
+  if (a is String) return _dartStringLiteral(a);
   if (a is List) return '[${a.map(_toLiteral).join(', ')}]';
   if (a is Map) {
     return '{${a.entries.map((e) => "${_toLiteral(e.key.toString())}: ${_toLiteral(e.value)}").join(', ')}}';
   }
   return a.toString();
+}
+
+String _dartStringLiteral(String value) {
+  final buffer = StringBuffer("'");
+  for (final rune in value.runes) {
+    switch (rune) {
+      case 0x5C: // \
+        buffer.write(r'\\');
+        break;
+      case 0x27: // '
+        buffer.write(r"\'");
+        break;
+      case 0x24: // $
+        buffer.write(r'\$');
+        break;
+      case 0x0A: // \n
+        buffer.write(r'\n');
+        break;
+      case 0x0D: // \r
+        buffer.write(r'\r');
+        break;
+      case 0x09: // \t
+        buffer.write(r'\t');
+        break;
+      case 0x08: // \b
+        buffer.write(r'\b');
+        break;
+      default:
+        if (rune < 0x20 || rune == 0x7F) {
+          buffer.write('\\u{${rune.toRadixString(16)}}');
+        } else {
+          buffer.writeCharCode(rune);
+        }
+    }
+  }
+  buffer.write("'");
+  return buffer.toString();
 }
 
 String toArgsLiteral(List<dynamic> args) => args.map(_toLiteral).join(', ');

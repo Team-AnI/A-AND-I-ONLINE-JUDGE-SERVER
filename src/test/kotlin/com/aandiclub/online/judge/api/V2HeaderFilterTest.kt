@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest
+import org.springframework.mock.http.server.reactive.MockServerHttpResponse
 import org.springframework.mock.web.server.MockServerWebExchange
 import org.springframework.web.server.ServerWebExchange
 import org.springframework.web.server.WebFilterChain
@@ -24,6 +25,10 @@ class V2HeaderFilterTest {
 
         assertEquals(0, chain.called)
         assertEquals(HttpStatus.BAD_REQUEST, exchange.response.statusCode)
+        val json = ObjectMapper().readTree((exchange.response as MockServerHttpResponse).bodyAsString.block())
+        assertEquals(false, json.path("success").asBoolean())
+        assertEquals(53001, json.path("error").path("code").asInt())
+        assertEquals("deviceOS", json.path("error").path("value").asText())
     }
 
     @Test

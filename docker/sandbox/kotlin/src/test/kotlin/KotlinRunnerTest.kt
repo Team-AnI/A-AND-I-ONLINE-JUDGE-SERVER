@@ -44,6 +44,20 @@ fun judgeToJsonLiteral(value: Any?): String {
 
 class KotlinRunnerTest {
 
+    @Test fun `buildCompileFailureDetail includes placeholder for empty compiler output`() {
+        val detail = buildCompileFailureDetail(
+            compileExit = 1,
+            compileOut = "",
+            sourceChars = 1234,
+            caseCount = 2,
+        )
+
+        assert(detail.contains("exit=1"))
+        assert(detail.contains("sourceChars=1234"))
+        assert(detail.contains("caseCount=2"))
+        assert(detail.contains("detail=<empty compiler output>"))
+    }
+
     // ── buildArgsLiteral: 스칼라 타입 ─────────────────────────────────────
 
     @Test fun `buildArgsLiteral handles scalar int args`() {
@@ -68,6 +82,28 @@ class KotlinRunnerTest {
 
     @Test fun `buildArgsLiteral handles string with special characters`() {
         assertEquals("\"he said \\\"hi\\\"\"", buildArgsLiteral(JSONArray().put("he said \"hi\"")))
+    }
+
+    @Test fun `buildArgsLiteral escapes newlines so multiline strings stay single source line`() {
+        assertEquals("\"line1\\nline2\"", buildArgsLiteral(JSONArray().put("line1\nline2")))
+    }
+
+    @Test fun `buildArgsLiteral escapes carriage return and tab`() {
+        assertEquals("\"a\\rb\\tc\"", buildArgsLiteral(JSONArray().put("a\rb\tc")))
+    }
+
+    @Test fun `buildArgsLiteral escapes dollar sign so it is not a Kotlin template`() {
+        assertEquals("\"\\\$foo\"", buildArgsLiteral(JSONArray().put("\$foo")))
+    }
+
+    @Test fun `buildArgsLiteral escapes other control characters using unicode escape`() {
+        assertEquals("\"\\u0001\\u007f\"", buildArgsLiteral(JSONArray().put("\u0001\u007f")))
+    }
+
+    @Test fun `buildArgsLiteral handles ANI Language style multiline program input`() {
+        val input = "FUNC ADD A B\nDO\nRETURN A + B\nEND\nFUNC MAIN\nDO\nPRINT A\nEND"
+        val expected = "\"FUNC ADD A B\\nDO\\nRETURN A + B\\nEND\\nFUNC MAIN\\nDO\\nPRINT A\\nEND\""
+        assertEquals(expected, buildArgsLiteral(JSONArray().put(input)))
     }
 
     // ── buildArgsLiteral: 리스트 타입 ────────────────────────────────────
@@ -276,6 +312,25 @@ class KotlinRunnerTest {
         )
         assertEquals("PASSED", result.getString("status"))
         assertEquals(5, result.getInt("output"))
+    }
+
+    @Test fun `generated code compiles and runs when input contains newlines and dollar signs`() {
+        val multilineInput = "FUNC ADD A B\nDO\nRETURN A + B\nEND\nFUNC MAIN\nDO\nPRINT A\nEND"
+        val result = runGeneratedSolution(
+            code = "fun solution(code: String): Int = code.lines().size",
+            argsJson = JSONArray().put(multilineInput),
+        )
+        assertEquals("PASSED", result.getString("status"))
+        assertEquals(8, result.getInt("output"))
+    }
+
+    @Test fun `generated code preserves dollar sign in input string without template interpolation`() {
+        val result = runGeneratedSolution(
+            code = "fun solution(s: String): String = s",
+            argsJson = JSONArray().put("price=\$100"),
+        )
+        assertEquals("PASSED", result.getString("status"))
+        assertEquals("price=\$100", result.getString("output"))
     }
 
     @Test fun `prepareKotlinSource rejects package declarations`() {

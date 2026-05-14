@@ -5,9 +5,11 @@ import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
 import org.springframework.core.io.buffer.DataBuffer
 import org.springframework.core.io.buffer.DataBufferUtils
+import org.springframework.http.MediaType
 import org.springframework.http.server.reactive.ServerHttpRequestDecorator
 import org.springframework.http.server.reactive.ServerHttpResponseDecorator
 import org.springframework.stereotype.Component
+import com.aandiclub.online.judge.config.ApiLoggingProperties
 import org.springframework.web.server.ServerWebExchange
 import org.springframework.web.server.WebFilter
 import org.springframework.web.server.WebFilterChain
@@ -19,16 +21,20 @@ import reactor.core.publisher.Mono
 class RequestResponseLoggingFilter(
     private val apiLogFactory: ApiLogFactory,
     private val apiLogWriter: ApiLogWriter,
+    private val properties: ApiLoggingProperties = ApiLoggingProperties(),
 ) : WebFilter {
     private val log = LoggerFactory.getLogger(RequestResponseLoggingFilter::class.java)
 
     override fun filter(exchange: ServerWebExchange, chain: WebFilterChain): Mono<Void> {
-        if (!isApiPath(exchange.request.path.pathWithinApplication().value())) {
+        val path = exchange.request.path.pathWithinApplication().value()
+        if (!isApiPath(path)) {
             return chain.filter(exchange)
         }
 
-        val context = ApiLogContext()
+        val context = ApiLogContext.from(exchange, properties.bodyCaptureLimitBytes)
         exchange.attributes[ApiLogContext.ATTRIBUTE_NAME] = context
+        exchange.response.headers.set(ApiLogContext.HEADER_TRACE_ID, context.traceId)
+        exchange.response.headers.set(ApiLogContext.HEADER_REQUEST_ID, context.requestId)
 
         val bufferFactory = exchange.response.bufferFactory()
 
@@ -45,14 +51,24 @@ class RequestResponseLoggingFilter(
 
         val decoratedResponse = object : ServerHttpResponseDecorator(exchange.response) {
             override fun writeWith(body: org.reactivestreams.Publisher<out DataBuffer>): Mono<Void> =
-                super.writeWith(Flux.from(body).map(::capture))
+                if (shouldSkipResponseBodyCapture(path)) {
+                    context.skipResponseBody(ApiLogContext.STREAMING_RESPONSE_SKIPPED)
+                    super.writeWith(body)
+                } else {
+                    super.writeWith(Flux.from(body).map(::capture))
+                }
 
             override fun writeAndFlushWith(body: org.reactivestreams.Publisher<out org.reactivestreams.Publisher<out DataBuffer>>): Mono<Void> =
-                super.writeAndFlushWith(
-                    Flux.from(body).map { publisher ->
-                        Flux.from(publisher).map(::capture)
-                    }
-                )
+                if (shouldSkipResponseBodyCapture(path)) {
+                    context.skipResponseBody(ApiLogContext.STREAMING_RESPONSE_SKIPPED)
+                    super.writeAndFlushWith(body)
+                } else {
+                    super.writeAndFlushWith(
+                        Flux.from(body).map { publisher ->
+                            Flux.from(publisher).map(::capture)
+                        }
+                    )
+                }
 
             private fun capture(dataBuffer: DataBuffer): DataBuffer {
                 val bytes = ByteArray(dataBuffer.readableByteCount())
@@ -80,5 +96,9 @@ class RequestResponseLoggingFilter(
     }
 
     private fun isApiPath(path: String): Boolean =
-        path.startsWith("/v1/") || path.startsWith("/v2/")
+        path.startsWith("/v1/") || path.startsWith("/v2/") || path == "/actuator/health"
+
+    private fun ServerHttpResponseDecorator.shouldSkipResponseBodyCapture(path: String): Boolean =
+        path.endsWith("/stream") ||
+            headers.contentType?.isCompatibleWith(MediaType.TEXT_EVENT_STREAM) == true
 }

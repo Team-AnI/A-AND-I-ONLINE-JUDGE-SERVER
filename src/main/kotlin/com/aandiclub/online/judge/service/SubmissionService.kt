@@ -5,11 +5,15 @@ import com.aandiclub.online.judge.api.dto.MyProblemSubmissionRecord
 import com.aandiclub.online.judge.api.dto.SubmissionAccepted
 import com.aandiclub.online.judge.api.dto.SubmissionRequest
 import com.aandiclub.online.judge.api.dto.SubmissionResult
+import com.aandiclub.online.judge.api.v2.support.V2ErrorCode
 import com.aandiclub.online.judge.domain.Submission
 import com.aandiclub.online.judge.domain.SubmissionStatus
 import com.aandiclub.online.judge.domain.TestCaseResult
 import com.aandiclub.online.judge.logging.SubmissionMdc
+import com.aandiclub.online.judge.logging.api.JudgeEventLogger
+import com.aandiclub.online.judge.logging.api.JudgeEventType
 import com.aandiclub.online.judge.repository.SubmissionRepository
+import com.aandiclub.online.judge.sandbox.SandboxExecutionException
 import com.aandiclub.online.judge.worker.JudgeWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +53,7 @@ class SubmissionService(
     private val judgeWorkerSemaphore: Semaphore,
     private val objectMapper: ObjectMapper,
     private val submissionProperties: com.aandiclub.online.judge.config.SubmissionProperties,
+    private val judgeEventLogger: JudgeEventLogger? = null,
 ) {
     private val log = LoggerFactory.getLogger(SubmissionService::class.java)
 
@@ -61,6 +66,7 @@ class SubmissionService(
     suspend fun createSubmission(
         request: SubmissionRequest,
         submitterId: String,
+        traceId: String? = null,
     ): SubmissionAccepted {
         // Resolve User by publicCode
         val user = userRepository.findByPublicCode(request.publicCode).awaitSingleOrNull()
@@ -95,6 +101,16 @@ class SubmissionService(
         )
         val saved = submissionRepository.save(submission).awaitSingle()
         judgePerformanceMonitorService.onSubmissionAccepted(saved)
+        judgeEventLogger?.event(
+            eventType = JudgeEventType.JUDGE_REQUESTED,
+            traceId = traceId,
+            resourceId = saved.id,
+            metadata = mapOf(
+                "submissionId" to saved.id,
+                "problemId" to saved.problemId,
+                "language" to saved.language.name,
+            ),
+        )
         SubmissionMdc.withSubmissionId(saved.id) {
             log.info("Submission created: language={}", saved.language)
         }
@@ -106,9 +122,23 @@ class SubmissionService(
 
         judgeWorkerScope.launch(Dispatchers.IO + SubmissionMdc.context(saved.id)) {
             judgeWorkerSemaphore.withPermit {
-                runCatching { judgeWorker.execute(saved) }
+                runCatching { judgeWorker.execute(saved, traceId = traceId) }
                     .onFailure { ex ->
                         log.error("Judge worker failed", ex)
+                        if (ex !is SandboxExecutionException) {
+                            judgeEventLogger?.eventError(
+                                eventType = JudgeEventType.JUDGE_COMPLETED,
+                                errorCode = V2ErrorCode.GRADING_FAILED,
+                                throwable = ex,
+                                traceId = traceId,
+                                resourceId = saved.id,
+                                metadata = mapOf(
+                                    "submissionId" to saved.id,
+                                    "problemId" to saved.problemId,
+                                    "language" to saved.language.name,
+                                ),
+                            )
+                        }
                         judgePerformanceMonitorService.onSubmissionFailed(saved.id)
                         val errorPayload = objectMapper.writeValueAsString(
                             mapOf(

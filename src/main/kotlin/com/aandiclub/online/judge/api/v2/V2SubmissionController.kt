@@ -10,6 +10,7 @@ import com.aandiclub.online.judge.api.v2.dto.toV2
 import com.aandiclub.online.judge.api.v2.support.V2ApiResponse
 import com.aandiclub.online.judge.api.v2.support.V2ApiResponses
 import com.aandiclub.online.judge.api.v2.support.V2ErrorCode
+import com.aandiclub.online.judge.logging.api.ApiLogContext
 import com.aandiclub.online.judge.service.SubmissionService
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.Parameter
@@ -102,7 +103,11 @@ class V2SubmissionController(
         exchange: ServerWebExchange,
     ): ResponseEntity<V2ApiResponse<V2SubmissionAcceptedData>> {
         val access = exchange.requestAccess()
-        val accepted = submissionService.createSubmission(request.toV1(), access.submitterId)
+        val accepted = submissionService.createSubmission(
+            request = request.toV1(),
+            submitterId = access.submitterId,
+            traceId = ApiLogContext.get(exchange)?.traceId,
+        )
         val data = accepted.toV2(streamUrl = "/v2/submissions/${accepted.submissionId}/stream")
         return ResponseEntity.accepted().body(V2ApiResponses.success(data))
     }
