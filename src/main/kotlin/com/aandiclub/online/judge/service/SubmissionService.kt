@@ -13,6 +13,7 @@ import com.aandiclub.online.judge.logging.SubmissionMdc
 import com.aandiclub.online.judge.logging.api.JudgeEventLogger
 import com.aandiclub.online.judge.logging.api.JudgeEventType
 import com.aandiclub.online.judge.repository.SubmissionRepository
+import com.aandiclub.online.judge.sandbox.SandboxExecutionException
 import com.aandiclub.online.judge.worker.JudgeWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -124,18 +125,20 @@ class SubmissionService(
                 runCatching { judgeWorker.execute(saved, traceId = traceId) }
                     .onFailure { ex ->
                         log.error("Judge worker failed", ex)
-                        judgeEventLogger?.eventError(
-                            eventType = JudgeEventType.JUDGE_COMPLETED,
-                            errorCode = V2ErrorCode.GRADING_FAILED,
-                            throwable = ex,
-                            traceId = traceId,
-                            resourceId = saved.id,
-                            metadata = mapOf(
-                                "submissionId" to saved.id,
-                                "problemId" to saved.problemId,
-                                "language" to saved.language.name,
-                            ),
-                        )
+                        if (ex !is SandboxExecutionException) {
+                            judgeEventLogger?.eventError(
+                                eventType = JudgeEventType.JUDGE_COMPLETED,
+                                errorCode = V2ErrorCode.GRADING_FAILED,
+                                throwable = ex,
+                                traceId = traceId,
+                                resourceId = saved.id,
+                                metadata = mapOf(
+                                    "submissionId" to saved.id,
+                                    "problemId" to saved.problemId,
+                                    "language" to saved.language.name,
+                                ),
+                            )
+                        }
                         judgePerformanceMonitorService.onSubmissionFailed(saved.id)
                         val errorPayload = objectMapper.writeValueAsString(
                             mapOf(

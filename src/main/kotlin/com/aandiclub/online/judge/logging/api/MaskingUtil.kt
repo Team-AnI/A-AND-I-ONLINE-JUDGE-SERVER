@@ -22,6 +22,15 @@ class MaskingUtil {
     fun maskMap(value: Map<String, *>): Map<String, Any?> =
         value.entries.associate { (key, item) -> key to maskValue(key, item) }
 
+    fun maskRaw(value: String): String {
+        val jsonMasked = JSON_SENSITIVE_FIELD_PATTERN.replace(value) {
+            "${it.groupValues[1]}$MASKED${it.groupValues[3]}"
+        }
+        return KEY_VALUE_SENSITIVE_FIELD_PATTERN.replace(jsonMasked) {
+            "${it.groupValues[1]}${it.groupValues[2]}$MASKED"
+        }
+    }
+
     fun maskValue(fieldName: String?, value: Any?): Any? = when (value) {
         null -> null
         is Map<*, *> -> value.entries.associate { (key, item) -> key.toString() to maskValue(key?.toString(), item) }
@@ -66,6 +75,12 @@ class MaskingUtil {
 
     companion object {
         private const val MASKED = "****"
+        private const val SENSITIVE_FIELD_PATTERN =
+            "passwordConfirm|accessToken|refreshToken|Authorization|Authenticate|password|token|salt|secret"
+        private val JSON_SENSITIVE_FIELD_PATTERN =
+            Regex("(?i)(\"(?:$SENSITIVE_FIELD_PATTERN)\"\\s*:\\s*\")([^\"]*)(\")")
+        private val KEY_VALUE_SENSITIVE_FIELD_PATTERN =
+            Regex("(?i)\\b($SENSITIVE_FIELD_PATTERN)\\b(\\s*[=:]\\s*)([^&;\\r\\n,]+)")
         private val SENSITIVE_FIELDS = setOf(
             "password",
             "passwordconfirm",

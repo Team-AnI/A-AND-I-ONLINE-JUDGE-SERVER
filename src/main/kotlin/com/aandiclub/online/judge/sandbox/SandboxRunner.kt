@@ -1,5 +1,6 @@
 package com.aandiclub.online.judge.sandbox
 
+import com.aandiclub.online.judge.api.v2.support.V2ErrorCode
 import com.aandiclub.online.judge.config.SandboxProperties
 import com.aandiclub.online.judge.domain.Language
 import com.aandiclub.online.judge.domain.TestCaseStatus
@@ -37,6 +38,12 @@ data class SandboxCaseOutput(
     val memoryMb: Double,
 )
 
+class SandboxExecutionException(
+    val errorCode: V2ErrorCode,
+    message: String,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)
+
 /** Internal DTO for deserializing the runner's stdout JSON. */
 private data class RunnerResult(
     val status: String? = null,
@@ -69,13 +76,9 @@ class SandboxRunner(
     ): SandboxCaseOutput =
         runAll(language, code, listOf(testCase))
             .firstOrNull()
-            ?: SandboxCaseOutput(
-                caseId = testCase.caseId,
-                status = TestCaseStatus.RUNTIME_ERROR,
-                output = null,
-                error = "RUNTIME_ERROR: sandbox produced no case result",
-                timeMs = 0.0,
-                memoryMb = 0.0,
+            ?: throw SandboxExecutionException(
+                errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                message = "sandbox produced no case result",
             )
 
     suspend fun runAll(
@@ -88,7 +91,10 @@ class SandboxRunner(
         }
 
         val image = properties.images[language.value]
-            ?: error("No sandbox image configured for language: $language")
+            ?: throw SandboxExecutionException(
+                errorCode = V2ErrorCode.JUDGE_WORKER_UNAVAILABLE,
+                message = "No sandbox image configured for language: $language",
+            )
 
         val payload = objectMapper.writeValueAsString(
             mapOf(
@@ -128,9 +134,17 @@ class SandboxRunner(
 
         log.debug("Starting sandbox container: name={}, image={}, cases={}", containerName, image, testCases.size)
 
-        val process = ProcessBuilder(cmd)
-            .redirectErrorStream(false)
-            .start()
+        val process = try {
+            ProcessBuilder(cmd)
+                .redirectErrorStream(false)
+                .start()
+        } catch (ex: Exception) {
+            throw SandboxExecutionException(
+                errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                message = "sandbox process failed to start: ${ex.message}",
+                cause = ex,
+            )
+        }
 
         val stdinThread = Thread {
             try {
@@ -155,7 +169,17 @@ class SandboxRunner(
             }
         }.also { it.isDaemon = true; it.start() }
 
-        process.waitFor()
+        try {
+            process.waitFor()
+        } catch (ex: InterruptedException) {
+            Thread.currentThread().interrupt()
+            process.destroyForcibly()
+            throw SandboxExecutionException(
+                errorCode = V2ErrorCode.SANDBOX_EXECUTION_TIMEOUT,
+                message = "sandbox execution interrupted or timed out",
+                cause = ex,
+            )
+        }
 
         stdoutThread.join(500)
         stderrThread.join(500)
@@ -181,6 +205,14 @@ class SandboxRunner(
             log.warn("Container {} produced blank stdout. stderr={}", containerName, stderrOutput)
         }
 
+        if (rawOutput.isBlank()) {
+            val detail = stderrOutput.takeIf { it.isNotBlank() }?.take(500)
+            throw SandboxExecutionException(
+                errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                message = "sandbox produced no output (exitCode=$exitCode${detail?.let { ", stderr=$it" } ?: ""})",
+            )
+        }
+
         return rawOutput
     }
 
@@ -201,16 +233,10 @@ class SandboxRunner(
         testCases: List<SandboxCaseInput>,
     ): List<SandboxCaseOutput> {
         if (rawOutput.isBlank()) {
-            return testCases.map {
-                SandboxCaseOutput(
-                    caseId = it.caseId,
-                    status = TestCaseStatus.RUNTIME_ERROR,
-                    output = null,
-                    error = "RUNTIME_ERROR: container produced no output",
-                    timeMs = 0.0,
-                    memoryMb = 0.0,
-                )
-            }
+            throw SandboxExecutionException(
+                errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                message = "sandbox produced no output",
+            )
         }
 
         return try {
@@ -218,6 +244,12 @@ class SandboxRunner(
             val root = objectMapper.readValue(rawOutput, Map::class.java) as Map<String, Any?>
             val rawResults = root["results"] as? List<*>
             if (rawResults.isNullOrEmpty()) {
+                if (!root.hasLegacySingleResult()) {
+                    throw SandboxExecutionException(
+                        errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                        message = "sandbox output protocol is invalid: results field is missing or empty",
+                    )
+                }
                 val fallback = parseRunnerOutput(rawOutput, exitCode = 0, language = language, externalMemoryMb = 0.0)
                 return testCases.map {
                     SandboxCaseOutput(
@@ -239,27 +271,20 @@ class SandboxRunner(
 
             testCases.map { testCase ->
                 parsedByCaseId[testCase.caseId]
-                    ?: SandboxCaseOutput(
-                        caseId = testCase.caseId,
-                        status = TestCaseStatus.RUNTIME_ERROR,
-                        output = null,
-                        error = "RUNTIME_ERROR: missing result for caseId=${testCase.caseId}",
-                        timeMs = 0.0,
-                        memoryMb = 0.0,
+                    ?: throw SandboxExecutionException(
+                        errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                        message = "sandbox output protocol is invalid: missing result for caseId=${testCase.caseId}",
                     )
             }
+        } catch (ex: SandboxExecutionException) {
+            throw ex
         } catch (e: Exception) {
             log.error("Failed to parse runner batch output: {}", rawOutput, e)
-            testCases.map {
-                SandboxCaseOutput(
-                    caseId = it.caseId,
-                    status = TestCaseStatus.RUNTIME_ERROR,
-                    output = null,
-                    error = "RUNTIME_ERROR: failed to parse runner output: ${e.message}",
-                    timeMs = 0.0,
-                    memoryMb = 0.0,
-                )
-            }
+            throw SandboxExecutionException(
+                errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                message = "sandbox output protocol is invalid: ${e.message}",
+                cause = e,
+            )
         }
     }
 
@@ -284,7 +309,16 @@ class SandboxRunner(
     }
 
     private fun resolveStatus(status: String?, error: String?): TestCaseStatus = when {
-        status != null -> runCatching { TestCaseStatus.valueOf(status) }.getOrElse { inferStatus(error) }
+        status != null -> runCatching { TestCaseStatus.valueOf(status) }.getOrElse {
+            if (error != null) {
+                inferStatus(error)
+            } else {
+                throw SandboxExecutionException(
+                    errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                    message = "sandbox output protocol is invalid: unknown status=$status",
+                )
+            }
+        }
         else -> inferStatus(error)
     }
 
@@ -303,12 +337,9 @@ class SandboxRunner(
         externalMemoryMb: Double,
     ): SandboxOutput {
         if (rawOutput.isBlank()) {
-            return SandboxOutput(
-                status = TestCaseStatus.RUNTIME_ERROR,
-                output = null,
-                error = "RUNTIME_ERROR: container produced no output (exit code $exitCode)",
-                timeMs = 0.0,
-                memoryMb = externalMemoryMb,
+            throw SandboxExecutionException(
+                errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                message = "sandbox produced no output (exit code $exitCode)",
             )
         }
 
@@ -335,15 +366,16 @@ class SandboxRunner(
             )
         } catch (e: Exception) {
             log.error("Failed to parse runner output: {}", rawOutput, e)
-            SandboxOutput(
-                status = TestCaseStatus.RUNTIME_ERROR,
-                output = null,
-                error = "RUNTIME_ERROR: failed to parse runner output: ${e.message}",
-                timeMs = 0.0,
-                memoryMb = externalMemoryMb,
+            throw SandboxExecutionException(
+                errorCode = V2ErrorCode.SANDBOX_EXECUTION_FAILED,
+                message = "sandbox output protocol is invalid: ${e.message}",
+                cause = e,
             )
         }
     }
+
+    private fun Map<String, Any?>.hasLegacySingleResult(): Boolean =
+        containsKey("status") || containsKey("output") || containsKey("error")
 
     private fun tmpfsMountOptions(language: Language): String = when (language) {
         Language.DART -> "/tmp:rw,exec,nosuid,size=64m"

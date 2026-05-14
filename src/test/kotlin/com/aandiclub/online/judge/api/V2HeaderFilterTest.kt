@@ -27,7 +27,7 @@ class V2HeaderFilterTest {
         assertEquals(HttpStatus.BAD_REQUEST, exchange.response.statusCode)
         val json = ObjectMapper().readTree((exchange.response as MockServerHttpResponse).bodyAsString.block())
         assertEquals(false, json.path("success").asBoolean())
-        assertEquals(93001, json.path("error").path("code").asInt())
+        assertEquals(53001, json.path("error").path("code").asInt())
         assertEquals("deviceOS", json.path("error").path("value").asText())
     }
 

@@ -84,6 +84,7 @@ judge:
     domain-code: ${SERVICE_DOMAIN_CODE:5}
     instance-id: ${INSTANCE_ID:${HOSTNAME:unknown-instance}}
     slow-threshold-ms: ${API_SLOW_THRESHOLD_MS:1000}
+    body-capture-limit-bytes: ${API_LOG_BODY_CAPTURE_LIMIT_BYTES:65536}
   sandbox:
     memory-limit-mb: ${SANDBOX_MEMORY_LIMIT_MB:256}
     kotlin-memory-limit-mb: ${SANDBOX_MEMORY_LIMIT_KOTLIN_MB:768}

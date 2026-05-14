@@ -15,6 +15,7 @@ import com.aandiclub.online.judge.repository.ProblemRepository
 import com.aandiclub.online.judge.repository.SubmissionRepository
 import com.aandiclub.online.judge.sandbox.SandboxCaseInput
 import com.aandiclub.online.judge.sandbox.SandboxCaseOutput
+import com.aandiclub.online.judge.sandbox.SandboxExecutionException
 import com.aandiclub.online.judge.sandbox.SandboxRunner
 import com.aandiclub.online.judge.service.JudgePerformanceMonitorService
 import com.aandiclub.online.judge.service.SubmissionEventPublisher
@@ -146,10 +147,9 @@ class JudgeWorker(
 
         val results = resolvedTestCases.map { testCase ->
             resultsByCaseId[testCase.caseId]
-                ?: TestCaseResult(
-                    caseId = testCase.caseId,
-                    status = TestCaseStatus.RUNTIME_ERROR,
-                    error = "RUNTIME_ERROR: missing sandbox result for caseId=${testCase.caseId}",
+                ?: throw SandboxExecutionException(
+                    errorCode = V2ErrorCode.GRADING_FAILED,
+                    message = "grading pipeline missed sandbox result for caseId=${testCase.caseId}",
                 )
         }
 
@@ -227,21 +227,42 @@ class JudgeWorker(
         submission: Submission,
         testCase: TestCase,
         traceId: String?,
-    ): SandboxCaseOutput = try {
-        sandboxRunner.runCase(
-            language = submission.language,
-            code = submission.code,
-            testCase = SandboxCaseInput(caseId = testCase.caseId, args = testCase.args),
-        )
-    } catch (ex: Exception) {
-        log.error("Sandbox case execution failed: submissionId={}, caseId={}", submission.id, testCase.caseId, ex)
-        judgeEventLogger?.eventError(
-            eventType = JudgeEventType.JUDGE_COMPLETED,
-            errorCode = if (ex.message?.contains("timeout", ignoreCase = true) == true) {
+    ): SandboxCaseOutput =
+        try {
+            sandboxRunner.runCase(
+                language = submission.language,
+                code = submission.code,
+                testCase = SandboxCaseInput(caseId = testCase.caseId, args = testCase.args),
+            )
+        } catch (ex: SandboxExecutionException) {
+            log.error("Sandbox infrastructure failed: submissionId={}, caseId={}", submission.id, testCase.caseId, ex)
+            emitSandboxFailure(submission, testCase, traceId, ex.errorCode, ex)
+            throw ex
+        } catch (ex: Exception) {
+            log.error("Sandbox case execution failed: submissionId={}, caseId={}", submission.id, testCase.caseId, ex)
+            val errorCode = if (ex.message?.contains("timeout", ignoreCase = true) == true) {
                 V2ErrorCode.SANDBOX_EXECUTION_TIMEOUT
             } else {
                 V2ErrorCode.SANDBOX_EXECUTION_FAILED
-            },
+            }
+            emitSandboxFailure(submission, testCase, traceId, errorCode, ex)
+            throw SandboxExecutionException(
+                errorCode = errorCode,
+                message = ex.message ?: "sandbox execution failed",
+                cause = ex,
+            )
+        }
+
+    private fun emitSandboxFailure(
+        submission: Submission,
+        testCase: TestCase,
+        traceId: String?,
+        errorCode: V2ErrorCode,
+        ex: Throwable,
+    ) {
+        judgeEventLogger?.eventError(
+            eventType = JudgeEventType.JUDGE_COMPLETED,
+            errorCode = errorCode,
             throwable = ex,
             traceId = traceId,
             resourceId = submission.id,
@@ -250,14 +271,6 @@ class JudgeWorker(
                 "problemId" to submission.problemId,
                 "caseId" to testCase.caseId,
             ),
-        )
-        SandboxCaseOutput(
-            caseId = testCase.caseId,
-            status = TestCaseStatus.RUNTIME_ERROR,
-            output = null,
-            error = "RUNTIME_ERROR: ${ex.message ?: "sandbox execution failed"}",
-            timeMs = 0.0,
-            memoryMb = 0.0,
         )
     }
 

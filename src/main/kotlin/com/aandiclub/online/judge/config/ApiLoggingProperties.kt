@@ -11,4 +11,5 @@ data class ApiLoggingProperties(
     val domainCode: Int = 5,
     val instanceId: String = "unknown-instance",
     val slowThresholdMs: Long = 1_000,
+    val bodyCaptureLimitBytes: Int = 64 * 1024,
 )

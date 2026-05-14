@@ -64,13 +64,17 @@ open class GlobalExceptionHandler {
         exchange.apiLogContext()?.recordException(ex, handled = true)
         val status = ex.statusCode
         val (errorCode, value, alert) = when (status.value()) {
+            400 -> Triple(V2ErrorCode.JUDGE_VALIDATION_FAILED, "request", "요청 값을 다시 확인해주세요.")
+            401 -> Triple(V2ErrorCode.JUDGE_AUTH_MISSING_HEADER, "Authenticate", "인증 정보가 올바르지 않습니다.")
             403 -> Triple(V2ErrorCode.JUDGE_FORBIDDEN, "authorization", "해당 요청에 접근할 수 없습니다.")
             404 -> if ((ex.reason ?: "").contains("User not found", ignoreCase = true)) {
                 Triple(V2ErrorCode.JUDGE_USER_NOT_FOUND, "publicCode", "해당 사용자를 찾을 수 없습니다.")
             } else {
                 Triple(V2ErrorCode.JUDGE_SUBMISSION_NOT_FOUND, "resource", "요청한 리소스를 찾을 수 없습니다.")
             }
-            else -> Triple(V2ErrorCode.INTERNAL_SERVER_ERROR, "", "요청 처리 중 오류가 발생했습니다.")
+            409 -> Triple(V2ErrorCode.JUDGE_RESULT_NOT_READY, "submission", "채점이 아직 완료되지 않았습니다.")
+            in 500..599 -> Triple(V2ErrorCode.JUDGE_INTERNAL_SERVER_ERROR, "judge", "요청 처리 중 오류가 발생했습니다.")
+            else -> Triple(V2ErrorCode.JUDGE_VALIDATION_FAILED, "request", "요청 값을 다시 확인해주세요.")
         }
         return ResponseEntity.status(status).body(
             V2ApiResponses.error(

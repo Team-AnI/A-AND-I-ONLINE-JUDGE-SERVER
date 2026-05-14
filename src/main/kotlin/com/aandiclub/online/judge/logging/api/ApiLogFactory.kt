@@ -27,6 +27,7 @@ class ApiLogFactory(
         val success = statusCode in 200..399 && response.success
         val latencyMs = context.latencyMs()
         val logType = resolveLogType(path, statusCode, success, latencyMs)
+        val service = buildService(response.error?.code)
         val level = when {
             logType == "API_SLOW" -> "WARN"
             logType == "HEALTH" && success -> "INFO"
@@ -52,13 +53,7 @@ class ApiLogFactory(
             logType = logType,
             message = message,
             env = properties.env,
-            service = ApiLogService(
-                name = properties.serviceName,
-                domain = properties.domain,
-                domainCode = properties.domainCode,
-                version = properties.version,
-                instanceId = properties.instanceId,
-            ),
+            service = service,
             trace = ApiTrace(
                 traceId = context.traceId,
                 requestId = context.requestId,
@@ -96,7 +91,7 @@ class ApiLogFactory(
             errorDetail = buildErrorDetail(context).takeIf {
                 logType == "API_ERROR" || logType == "EVENT_ERROR" || logType == "APP_ERROR" || logType == "SECURITY"
             },
-            tags = buildTags(exchange, route, success),
+            tags = buildTags(exchange, route, success, service.domain),
         )
     }
 
@@ -116,6 +111,7 @@ class ApiLogFactory(
             requestId = UUID.randomUUID().toString(),
         )
         throwable?.let { context.recordException(it, handled = true) }
+        val service = buildService(errorCode?.code)
         return ApiLogEntry(
             timestamp = Instant.now(),
             level = when {
@@ -126,13 +122,7 @@ class ApiLogFactory(
             logType = logType,
             message = if (success) "$eventType completed" else "$eventType failed",
             env = properties.env,
-            service = ApiLogService(
-                name = properties.serviceName,
-                domain = properties.domain,
-                domainCode = properties.domainCode,
-                version = properties.version,
-                instanceId = properties.instanceId,
-            ),
+            service = service,
             trace = ApiTrace(
                 traceId = context.traceId,
                 requestId = context.requestId,
@@ -185,7 +175,7 @@ class ApiLogFactory(
             ),
             errorDetail = buildErrorDetail(context).takeIf { !success },
             tags = listOf(
-                properties.domain.sanitizeTag(),
+                service.domain.sanitizeTag(),
                 "event",
                 if (success) "success" else "fail",
                 eventType.sanitizeTag(),
@@ -217,16 +207,20 @@ class ApiLogFactory(
         val bytes = context.requestBody()
         if (bytes.isEmpty()) return emptyMap<String, Any>()
         val raw = bytes.toString(Charsets.UTF_8)
-        return parseAndMaskJson(raw) ?: mapOf("raw" to raw)
+        if (context.requestBodyTruncated) {
+            return rawBodySummary(raw, truncated = true)
+        }
+        return parseAndMaskJson(raw) ?: rawBodySummary(raw, truncated = false)
     }
 
     private fun buildResponse(exchange: ServerWebExchange, context: ApiLogContext, statusCode: Int): ApiResponse {
         val contentType = exchange.response.headers.contentType?.toString()
         val fallbackTimestamp = Instant.now()
-        if (isEventStream(contentType)) {
+        val skippedReason = context.responseBodySkippedReason
+        if (skippedReason != null || isEventStream(contentType)) {
             return ApiResponse(
                 success = statusCode in 200..399,
-                data = mapOf("stream" to "text/event-stream"),
+                data = if (statusCode in 200..399) mapOf("body" to (skippedReason ?: ApiLogContext.STREAMING_RESPONSE_SKIPPED)) else null,
                 error = if (statusCode >= 400) buildFallbackError(statusCode, path = exchange.request.path.pathWithinApplication().value()) else null,
                 timestamp = fallbackTimestamp,
             )
@@ -243,6 +237,14 @@ class ApiLogFactory(
         }
 
         val node = parseJson(raw)
+        if (context.responseBodyTruncated) {
+            return ApiResponse(
+                success = statusCode in 200..399,
+                data = if (statusCode in 200..399) rawBodySummary(raw, truncated = true) else null,
+                error = if (statusCode >= 400) buildFallbackError(statusCode, exchange.request.path.pathWithinApplication().value(), context) else null,
+                timestamp = fallbackTimestamp,
+            )
+        }
         if (node != null && node.isObject && node.has("success") && node.has("timestamp")) {
             val success = node.path("success").asBoolean(statusCode in 200..399)
             val timestamp = node.path("timestamp").asText().let(::parseInstantOrNow)
@@ -273,7 +275,7 @@ class ApiLogFactory(
 
         return ApiResponse(
             success = true,
-            data = parseAndMaskJson(raw) ?: mapOf("raw" to raw),
+            data = parseAndMaskJson(raw) ?: rawBodySummary(raw, truncated = false),
             error = null,
             timestamp = fallbackTimestamp,
         )
@@ -318,7 +320,7 @@ class ApiLogFactory(
         404 -> V2ErrorCode.JUDGE_SUBMISSION_NOT_FOUND
         409 -> V2ErrorCode.JUDGE_RESULT_NOT_READY
         429 -> V2ErrorCode.JUDGE_RATE_LIMIT_EXCEEDED
-        502 -> V2ErrorCode.EXTERNAL_SYSTEM_ERROR
+        502 -> V2ErrorCode.SANDBOX_EXECUTION_FAILED
         504 -> V2ErrorCode.SANDBOX_EXECUTION_TIMEOUT
         else -> V2ErrorCode.JUDGE_INTERNAL_SERVER_ERROR
     }
@@ -346,6 +348,24 @@ class ApiLogFactory(
         return "$normalizedTarget failed: $detail"
     }
 
+    private fun buildService(errorCode: Int?): ApiLogService {
+        val domainCode = errorCode?.toString()?.firstOrNull()?.digitToIntOrNull()
+        val domain = if (domainCode == 9) "common" else properties.domain
+        return ApiLogService(
+            name = properties.serviceName,
+            domain = domain,
+            domainCode = domainCode?.takeIf { it == 9 } ?: properties.domainCode,
+            version = properties.version,
+            instanceId = properties.instanceId,
+        )
+    }
+
+    private fun rawBodySummary(raw: String, truncated: Boolean): Map<String, Any?> =
+        mapOf(
+            "raw" to maskingUtil.maskRaw(raw),
+            "truncated" to truncated,
+        )
+
     private fun resolveLogType(path: String, statusCode: Int, success: Boolean, latencyMs: Long): String = when {
         path == "/actuator/health" -> "HEALTH"
         statusCode == 401 || statusCode == 403 -> "SECURITY"
@@ -372,7 +392,7 @@ class ApiLogFactory(
         return "sha256:" + digest.digest(input).joinToString("") { "%02x".format(it) }.take(16)
     }
 
-    private fun buildTags(exchange: ServerWebExchange, route: String, success: Boolean): List<String> {
+    private fun buildTags(exchange: ServerWebExchange, route: String, success: Boolean, domain: String): List<String> {
         val segments = route.trim('/').split('/').filter { it.isNotBlank() }
         val featureIndex = when {
             segments.getOrNull(1) == "admin" -> 2
@@ -391,7 +411,7 @@ class ApiLogFactory(
             else -> "request"
         }
         return listOf(
-            properties.domain.sanitizeTag(),
+            domain.sanitizeTag(),
             feature,
             if (success) "success" else "fail",
             detail,
