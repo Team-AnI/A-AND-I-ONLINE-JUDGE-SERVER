@@ -38,6 +38,23 @@ class V2ControllerAdviceWebFluxTest {
     }
 
     @Test
+    fun `unsupported language returns language error code`() {
+        val body = webTestClient.post()
+            .uri("/v2/submissions")
+            .contentType(MediaType.APPLICATION_JSON)
+            .bodyValue("""{"publicCode":"A00123","problemId":"quiz-101","language":"RUBY","code":"puts 1"}""")
+            .exchange()
+            .expectStatus().isBadRequest
+            .expectBody()
+            .returnResult()
+            .responseBody
+
+        val json = ObjectMapper().readTree(body)
+        assertEquals(false, json.path("success").asBoolean())
+        assertEquals(54302, json.path("error").path("code").asInt())
+    }
+
+    @Test
     fun `service not found error returns v2 envelope`() {
         coEvery { submissionService.createSubmission(any(), any()) } throws ResponseStatusException(
             HttpStatus.NOT_FOUND,

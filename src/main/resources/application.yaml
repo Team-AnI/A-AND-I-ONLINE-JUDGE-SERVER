@@ -78,10 +78,12 @@ judge:
     max-messages: ${JUDGE_USER_EVENTS_MAX_MESSAGES:10}
   api-logging:
     env: ${APP_ENV:${SPRING_PROFILES_ACTIVE:local}}
-    service-name: ${SERVICE_NAME:judge}
+    service-name: ${SERVICE_NAME:judge-service}
+    domain: ${SERVICE_DOMAIN:judge}
     version: ${APP_VERSION:0.0.1-SNAPSHOT}
     domain-code: ${SERVICE_DOMAIN_CODE:5}
     instance-id: ${INSTANCE_ID:${HOSTNAME:unknown-instance}}
+    slow-threshold-ms: ${API_SLOW_THRESHOLD_MS:1000}
   sandbox:
     memory-limit-mb: ${SANDBOX_MEMORY_LIMIT_MB:256}
     kotlin-memory-limit-mb: ${SANDBOX_MEMORY_LIMIT_KOTLIN_MB:768}

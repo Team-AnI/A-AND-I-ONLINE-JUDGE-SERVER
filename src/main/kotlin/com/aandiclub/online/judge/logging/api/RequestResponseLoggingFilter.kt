@@ -27,8 +27,10 @@ class RequestResponseLoggingFilter(
             return chain.filter(exchange)
         }
 
-        val context = ApiLogContext()
+        val context = ApiLogContext.from(exchange)
         exchange.attributes[ApiLogContext.ATTRIBUTE_NAME] = context
+        exchange.response.headers.set(ApiLogContext.HEADER_TRACE_ID, context.traceId)
+        exchange.response.headers.set(ApiLogContext.HEADER_REQUEST_ID, context.requestId)
 
         val bufferFactory = exchange.response.bufferFactory()
 
@@ -80,5 +82,5 @@ class RequestResponseLoggingFilter(
     }
 
     private fun isApiPath(path: String): Boolean =
-        path.startsWith("/v1/") || path.startsWith("/v2/")
+        path.startsWith("/v1/") || path.startsWith("/v2/") || path == "/actuator/health"
 }

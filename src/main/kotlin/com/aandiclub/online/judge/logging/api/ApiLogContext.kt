@@ -16,6 +16,8 @@ class ApiLogContext(
 
     var handledException: Throwable? = null
         private set
+    var exceptionHandled: Boolean = false
+        private set
 
     fun appendRequest(bytes: ByteArray) {
         requestBuffer.write(bytes)
@@ -31,14 +33,30 @@ class ApiLogContext(
 
     fun latencyMs(): Long = ((System.nanoTime() - startedAtNanos) / 1_000_000).coerceAtLeast(0)
 
-    fun recordException(throwable: Throwable) {
+    fun recordException(throwable: Throwable, handled: Boolean = false) {
         handledException = throwable
+        exceptionHandled = handled
     }
 
     companion object {
         const val ATTRIBUTE_NAME: String = "api.log.context"
+        const val HEADER_TRACE_ID: String = "X-Trace-Id"
+        const val HEADER_REQUEST_ID: String = "X-Request-Id"
+        private const val HEADER_B3_TRACE_ID: String = "X-B3-TraceId"
 
         fun get(exchange: ServerWebExchange): ApiLogContext? =
             exchange.getAttribute(ATTRIBUTE_NAME)
+
+        fun from(exchange: ServerWebExchange): ApiLogContext =
+            ApiLogContext(
+                traceId = incomingTraceId(exchange) ?: UUID.randomUUID().toString(),
+                requestId = UUID.randomUUID().toString(),
+            )
+
+        private fun incomingTraceId(exchange: ServerWebExchange): String? =
+            listOfNotNull(
+                exchange.request.headers.getFirst(HEADER_TRACE_ID),
+                exchange.request.headers.getFirst(HEADER_B3_TRACE_ID),
+            ).firstOrNull { it.isNotBlank() }
     }
 }

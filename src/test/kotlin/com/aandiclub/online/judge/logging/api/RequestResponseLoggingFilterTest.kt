@@ -50,6 +50,7 @@ class RequestResponseLoggingFilterTest {
             headers = mapOf(
                 "deviceOS" to "ANDROID",
                 "Authenticate" to "Bearer jwt-token",
+                "X-Trace-Id" to "gateway-trace-1",
                 "timestamp" to "1712600000",
                 "salt" to "salt-value",
             ),
@@ -61,11 +62,16 @@ class RequestResponseLoggingFilterTest {
         assertEquals("INFO", entry.level)
         assertEquals("API", entry.logType)
         assertEquals("HTTP request completed", entry.message)
+        assertEquals("judge", entry.service.domain)
+        assertEquals("gateway-trace-1", entry.trace.traceId)
+        assertTrue(entry.trace.requestId.isNotBlank())
         assertEquals("Bearer ****", entry.headers.Authenticate)
+        assertEquals("****", entry.headers.salt)
         assertEquals("ANDROID", entry.headers.deviceOS)
         assertEquals("han******", (entry.request.body as Map<*, *>)["loginId"])
         assertEquals("****", (entry.request.body as Map<*, *>)["password"])
         assertEquals("****", (entry.request.body as Map<*, *>)["accessToken"])
+        assertEquals("****", (entry.response.data as Map<*, *>)["accessToken"])
         assertEquals(true, entry.response.success)
         assertEquals("judge", entry.tags[0])
         assertEquals("auth", entry.tags[1])
@@ -86,11 +92,78 @@ class RequestResponseLoggingFilterTest {
 
         val entry = writer.entries.single()
         assertEquals("WARN", entry.level)
-        assertEquals("API_ERROR", entry.logType)
+        assertEquals("SECURITY", entry.logType)
         assertTrue(entry.message.contains("invalid credentials"))
         assertFalse(entry.response.success)
         assertEquals(V2ErrorCode.JUDGE_AUTH_INVALID_TOKEN.code, entry.response.error?.code)
         assertEquals("fail", entry.tags[2])
+    }
+
+    @Test
+    fun `writes api slow log when latency threshold is exceeded`() {
+        writer.entries.clear()
+        val slowFactory = ApiLogFactory(
+            objectMapper = objectMapper,
+            maskingUtil = maskingUtil,
+            properties = ApiLoggingProperties(
+                env = "test",
+                serviceName = "judge",
+                domain = "judge",
+                version = "1.2.3",
+                domainCode = 5,
+                instanceId = "judge-test-1",
+                slowThresholdMs = 0,
+            ),
+        )
+        val slowFilter = RequestResponseLoggingFilter(slowFactory, writer)
+        val exchange = exchange(
+            path = "/v2/submissions",
+            body = """{"code":"print(1)"}""",
+            headers = mapOf("Authenticate" to "Bearer jwt-token"),
+        )
+
+        slowFilter.filter(exchange, SuccessChain(objectMapper)).block()
+
+        val entry = writer.entries.single()
+        assertEquals("WARN", entry.level)
+        assertEquals("API_SLOW", entry.logType)
+    }
+
+    @Test
+    fun `writes error detail without stack trace body for handled exception`() {
+        writer.entries.clear()
+        val exchange = exchange(
+            path = "/v2/submissions",
+            body = """{"code":"print(1)"}""",
+            headers = mapOf("Authenticate" to "Bearer jwt-token"),
+        )
+
+        filter.filter(exchange, HandledExceptionChain(objectMapper)).block()
+
+        val entry = writer.entries.single()
+        assertEquals("API_ERROR", entry.logType)
+        assertEquals(V2ErrorCode.JUDGE_INTERNAL_SERVER_ERROR.code, entry.response.error?.code)
+        assertEquals("java.lang.IllegalStateException", entry.errorDetail?.exceptionClass)
+        assertEquals("handled boom", entry.errorDetail?.exceptionMessage)
+        assertTrue(entry.errorDetail?.stackTraceHash?.startsWith("sha256:") == true)
+        assertEquals(true, entry.errorDetail?.handled)
+    }
+
+    @Test
+    fun `creates structured judge event log`() {
+        val entry = apiLogFactory.createEvent(
+            eventType = "JUDGE_COMPLETED",
+            logType = "EVENT",
+            traceId = "trace-event-1",
+            resourceId = "sub-1",
+            metadata = mapOf("accessToken" to "raw-token"),
+        )
+
+        assertEquals("EVENT", entry.logType)
+        assertEquals("trace-event-1", entry.trace.traceId)
+        assertEquals("JUDGE_COMPLETED", entry.event?.eventType)
+        assertEquals("sub-1", entry.event?.resourceId)
+        assertEquals("****", entry.event?.metadata?.get("accessToken"))
     }
 
     private fun exchange(path: String, body: String, headers: Map<String, String>): MockServerWebExchange {
@@ -145,6 +218,26 @@ class RequestResponseLoggingFilterTest {
                         )
                     )
                     exchange.response.statusCode = HttpStatus.UNAUTHORIZED
+                    exchange.response.headers.contentType = MediaType.APPLICATION_JSON
+                    exchange.response.writeWith(Mono.just(exchange.response.bufferFactory().wrap(body)))
+                }
+    }
+
+    private class HandledExceptionChain(
+        private val objectMapper: ObjectMapper,
+    ) : WebFilterChain {
+        override fun filter(exchange: ServerWebExchange): Mono<Void> =
+            DataBufferUtils.join(exchange.request.body)
+                .flatMap { dataBuffer ->
+                    DataBufferUtils.release(dataBuffer)
+                    ApiLogContext.get(exchange)?.recordException(IllegalStateException("handled boom"), handled = true)
+                    val body = objectMapper.writeValueAsBytes(
+                        V2ApiResponses.error(
+                            errorCode = V2ErrorCode.JUDGE_INTERNAL_SERVER_ERROR,
+                            message = "handled boom",
+                        )
+                    )
+                    exchange.response.statusCode = HttpStatus.INTERNAL_SERVER_ERROR
                     exchange.response.headers.contentType = MediaType.APPLICATION_JSON
                     exchange.response.writeWith(Mono.just(exchange.response.bufferFactory().wrap(body)))
                 }

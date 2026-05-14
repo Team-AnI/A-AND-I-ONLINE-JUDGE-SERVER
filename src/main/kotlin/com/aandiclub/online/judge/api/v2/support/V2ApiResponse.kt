@@ -42,7 +42,7 @@ object V2ApiResponses {
 
     fun error(
         errorCode: V2ErrorCode,
-        value: String = "",
+        value: String = errorCode.value,
         message: String = errorCode.defaultMessage,
         alert: String = errorCode.defaultAlert,
         timestamp: Instant = Instant.now(),

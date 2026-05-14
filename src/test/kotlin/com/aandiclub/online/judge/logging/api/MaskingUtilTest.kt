@@ -15,9 +15,14 @@ class MaskingUtilTest {
             {
               "loginId": "hans1234",
               "password": "secret",
+              "passwordConfirm": "secret",
+              "token": "token-value",
+              "salt": "salt-value",
+              "secret": "client-secret",
               "nested": {
                 "accessToken": "access-token",
-                "refreshToken": "refresh-token"
+                "refreshToken": "refresh-token",
+                "Authenticate": "Bearer nested-token"
               }
             }
             """.trimIndent()
@@ -28,8 +33,13 @@ class MaskingUtilTest {
 
         assertEquals("han******", masked["loginId"])
         assertEquals("****", masked["password"])
+        assertEquals("****", masked["passwordConfirm"])
+        assertEquals("****", masked["token"])
+        assertEquals("****", masked["salt"])
+        assertEquals("****", masked["secret"])
         assertEquals("****", nested["accessToken"])
         assertEquals("****", nested["refreshToken"])
+        assertEquals("****", nested["Authenticate"])
     }
 
     @Test

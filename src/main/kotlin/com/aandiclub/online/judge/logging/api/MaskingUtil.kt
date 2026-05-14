@@ -50,7 +50,7 @@ class MaskingUtil {
     }
 
     private fun maskString(fieldName: String?, value: String): String = when (fieldName?.lowercase()) {
-        "password", "accesstoken", "refreshtoken" -> MASKED
+        in SENSITIVE_FIELDS -> MASKED
         "loginid" -> maskLoginId(value)
         else -> value
     }
@@ -66,5 +66,16 @@ class MaskingUtil {
 
     companion object {
         private const val MASKED = "****"
+        private val SENSITIVE_FIELDS = setOf(
+            "password",
+            "passwordconfirm",
+            "accesstoken",
+            "refreshtoken",
+            "authorization",
+            "authenticate",
+            "token",
+            "salt",
+            "secret",
+        )
     }
 }

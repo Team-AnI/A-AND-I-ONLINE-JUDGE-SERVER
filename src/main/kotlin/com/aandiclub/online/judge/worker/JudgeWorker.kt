@@ -2,12 +2,15 @@ package com.aandiclub.online.judge.worker
 
 import com.aandiclub.online.judge.config.ProblemCatalogProperties
 import com.aandiclub.online.judge.config.SandboxProperties
+import com.aandiclub.online.judge.api.v2.support.V2ErrorCode
 import com.aandiclub.online.judge.domain.Submission
 import com.aandiclub.online.judge.domain.SubmissionStatus
 import com.aandiclub.online.judge.domain.TestCase
 import com.aandiclub.online.judge.domain.TestCaseResult
 import com.aandiclub.online.judge.domain.TestCaseStatus
 import com.aandiclub.online.judge.logging.SubmissionMdc
+import com.aandiclub.online.judge.logging.api.JudgeEventLogger
+import com.aandiclub.online.judge.logging.api.JudgeEventType
 import com.aandiclub.online.judge.repository.ProblemRepository
 import com.aandiclub.online.judge.repository.SubmissionRepository
 import com.aandiclub.online.judge.sandbox.SandboxCaseInput
@@ -41,15 +44,27 @@ class JudgeWorker(
     private val problemCatalogProperties: ProblemCatalogProperties,
     private val judgePerformanceMonitorService: JudgePerformanceMonitorService,
     private val submissionEventPublisher: SubmissionEventPublisher?,
+    private val judgeEventLogger: JudgeEventLogger? = null,
 ) {
     private val log = LoggerFactory.getLogger(JudgeWorker::class.java)
 
     suspend fun execute(
         submission: Submission,
         testCases: List<TestCase>? = null,
+        traceId: String? = null,
     ): Unit = withContext(SubmissionMdc.context(submission.id)) {
         val resolvedTestCases = testCases ?: loadTestCases(submission.problemId)
         log.info("Judge worker started: cases={}", resolvedTestCases.size)
+        judgeEventLogger?.event(
+            eventType = JudgeEventType.JUDGE_STARTED,
+            traceId = traceId,
+            resourceId = submission.id,
+            metadata = mapOf(
+                "submissionId" to submission.id,
+                "problemId" to submission.problemId,
+                "caseCount" to resolvedTestCases.size,
+            ),
+        )
         judgePerformanceMonitorService.onSubmissionStarted(submission, resolvedTestCases.size)
 
         submission.status = SubmissionStatus.RUNNING
@@ -66,6 +81,16 @@ class JudgeWorker(
             submission.status = SubmissionStatus.RUNTIME_ERROR
             submission.completedAt = Instant.now()
             submissionRepository.save(submission).awaitSingle()
+            judgeEventLogger?.event(
+                eventType = JudgeEventType.JUDGE_RESULT_SAVED,
+                traceId = traceId,
+                resourceId = submission.id,
+                metadata = mapOf(
+                    "submissionId" to submission.id,
+                    "problemId" to submission.problemId,
+                    "status" to submission.status.name,
+                ),
+            )
             judgePerformanceMonitorService.onSubmissionCompleted(submission, SubmissionStatus.RUNTIME_ERROR)
 
             val resultPayload = objectMapper.writeValueAsString(result)
@@ -89,6 +114,16 @@ class JudgeWorker(
             } else {
                 log.warn("SubmissionEventPublisher is not configured, skipping judge completed event: submissionId={}", submission.id)
             }
+            judgeEventLogger?.event(
+                eventType = JudgeEventType.JUDGE_COMPLETED,
+                traceId = traceId,
+                resourceId = submission.id,
+                metadata = mapOf(
+                    "submissionId" to submission.id,
+                    "problemId" to submission.problemId,
+                    "status" to submission.status.name,
+                ),
+            )
             return@withContext
         }
 
@@ -98,7 +133,7 @@ class JudgeWorker(
                 async {
                     caseSemaphore.withPermit {
                         judgePerformanceMonitorService.onCaseStarted(submission.id)
-                        val output = runCaseSafely(submission, testCase)
+                        val output = runCaseSafely(submission, testCase, traceId)
                         val result = toTestCaseResult(testCase, output)
                         judgePerformanceMonitorService.onCaseFinished(submission.id, result)
                         val payload = objectMapper.writeValueAsString(result)
@@ -127,6 +162,16 @@ class JudgeWorker(
         submission.status = finalStatus
         submission.completedAt = Instant.now()
         submissionRepository.save(submission).awaitSingle()
+        judgeEventLogger?.event(
+            eventType = JudgeEventType.JUDGE_RESULT_SAVED,
+            traceId = traceId,
+            resourceId = submission.id,
+            metadata = mapOf(
+                "submissionId" to submission.id,
+                "problemId" to submission.problemId,
+                "status" to finalStatus.name,
+            ),
+        )
         judgePerformanceMonitorService.onSubmissionCompleted(submission, finalStatus)
 
         val donePayload = objectMapper.writeValueAsString(
@@ -148,6 +193,16 @@ class JudgeWorker(
         } else {
             log.warn("SubmissionEventPublisher is not configured, skipping judge completed event: submissionId={}", submission.id)
         }
+        judgeEventLogger?.event(
+            eventType = JudgeEventType.JUDGE_COMPLETED,
+            traceId = traceId,
+            resourceId = submission.id,
+            metadata = mapOf(
+                "submissionId" to submission.id,
+                "problemId" to submission.problemId,
+                "status" to finalStatus.name,
+            ),
+        )
         Unit
     }
 
@@ -171,6 +226,7 @@ class JudgeWorker(
     private suspend fun runCaseSafely(
         submission: Submission,
         testCase: TestCase,
+        traceId: String?,
     ): SandboxCaseOutput = try {
         sandboxRunner.runCase(
             language = submission.language,
@@ -179,6 +235,22 @@ class JudgeWorker(
         )
     } catch (ex: Exception) {
         log.error("Sandbox case execution failed: submissionId={}, caseId={}", submission.id, testCase.caseId, ex)
+        judgeEventLogger?.eventError(
+            eventType = JudgeEventType.JUDGE_COMPLETED,
+            errorCode = if (ex.message?.contains("timeout", ignoreCase = true) == true) {
+                V2ErrorCode.SANDBOX_EXECUTION_TIMEOUT
+            } else {
+                V2ErrorCode.SANDBOX_EXECUTION_FAILED
+            },
+            throwable = ex,
+            traceId = traceId,
+            resourceId = submission.id,
+            metadata = mapOf(
+                "submissionId" to submission.id,
+                "problemId" to submission.problemId,
+                "caseId" to testCase.caseId,
+            ),
+        )
         SandboxCaseOutput(
             caseId = testCase.caseId,
             status = TestCaseStatus.RUNTIME_ERROR,

@@ -20,12 +20,15 @@ data class ApiLogEntry(
     val actor: ApiActor,
     val request: ApiRequest,
     val response: ApiResponse,
+    val event: ApiEvent? = null,
+    val errorDetail: ApiErrorDetail? = null,
     val tags: List<String>,
 )
 
 @JsonInclude(JsonInclude.Include.ALWAYS)
 data class ApiLogService(
     val name: String,
+    val domain: String,
     val domainCode: Int,
     val version: String,
     val instanceId: String,
@@ -87,6 +90,22 @@ data class ApiResponse(
 data class ApiError(
     val code: Int,
     val message: String,
-    val value: Any?,
+    val value: String?,
     val alert: String?,
+)
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class ApiEvent(
+    val eventType: String,
+    val resourceId: String? = null,
+    val metadata: Map<String, Any?> = emptyMap(),
+)
+
+@JsonInclude(JsonInclude.Include.ALWAYS)
+data class ApiErrorDetail(
+    val exceptionClass: String,
+    val exceptionMessage: String?,
+    val stackTraceHash: String,
+    val rootCause: String?,
+    val handled: Boolean,
 )

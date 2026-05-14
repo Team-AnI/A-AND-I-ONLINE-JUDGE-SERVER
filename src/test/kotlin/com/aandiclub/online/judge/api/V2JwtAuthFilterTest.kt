@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest
+import org.springframework.mock.http.server.reactive.MockServerHttpResponse
 import org.springframework.mock.web.server.MockServerWebExchange
 import org.springframework.web.server.ServerWebExchange
 import org.springframework.web.server.WebFilterChain
@@ -42,6 +43,10 @@ class V2JwtAuthFilterTest {
 
         assertEquals(0, chain.called)
         assertEquals(HttpStatus.UNAUTHORIZED, exchange.response.statusCode)
+        val json = objectMapper.readTree((exchange.response as MockServerHttpResponse).bodyAsString.block())
+        assertEquals(false, json.path("success").asBoolean())
+        assertEquals(51001, json.path("error").path("code").asInt())
+        assertEquals("Authenticate", json.path("error").path("value").asText())
     }
 
     @Test
